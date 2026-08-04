@@ -1809,9 +1809,9 @@ Required support:
 
 ```rust
 pub struct JedecFile {
-    pub fuse_count: usize,
+    pub design_specification: Option<String>,
+    pub fuses: FuseVector,
     pub default_fuse: bool,
-    pub fuses: BitVec,
     pub notes: Vec<String>,
     pub security: Option<bool>,
     pub fuse_checksum: Option<u16>,
@@ -1819,6 +1819,15 @@ pub struct JedecFile {
     pub unknown_fields: Vec<JedecField>,
 }
 ```
+
+Two deviations from the original sketch, both deliberate:
+
+- `fuse_count` and `fuses: BitVec` are collapsed into one `FuseVector`, which owns the count. A `fuse_count` that disagrees with the length of the fuse data is not a state worth being able to represent.
+- `design_specification` is added. The free-text header between STX and the first `*` is part of the file and must survive a rewrite. `None` means the file had no header; `Some("")` means it had an empty one — different facts when round-tripping.
+
+`FuseVector` stores JEDEC's own 8-bit word layout: fuse *N* is bit `N % 8` of word `N / 8`, least-significant bit first. The fuse checksum is then the sum of the words, with no separate packing step that could be written backwards.
+
+The `L` field's separator between fuse number and fuse states is **required**, not merely conventional. Fuse states are `0` and `1`, which are also decimal digits, so without the separator the field is ambiguous and must be rejected rather than guessed at.
 
 Parser modes: strict, compatible, preserve-unknown. Writer styles: canonical, compact, WinCUPL-comparable.
 
