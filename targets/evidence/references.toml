@@ -106,6 +106,7 @@ revision = "not present in extractable PDF metadata; the sha256 is the identity"
 authoritative_for = [
   "ATF22V10C architecture and logic diagram",
   "DIP-24 pinout and pin roles",
+  "the IN/PD pin and power-down mode behaviour (§9)",
   "macrocell structure and per-macrocell product-term allocation",
   "register behavior, global clock, reset/preset resources",
   "signature and security fuse behavior",

@@ -1,0 +1,18 @@
+Name     clk-shared;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Pin 1 is the global clock. Is it simultaneously usable as an array
+   input? A registered output needs the clock; if pin 1 also appears as
+   a literal in the data term, the pin serves both roles at once. */
+
+PIN 1  = a;
+PIN 23 = o0;
+
+o0.d = a;

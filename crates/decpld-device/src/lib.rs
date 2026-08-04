@@ -12,7 +12,12 @@
 //! ```
 
 mod fuse_map;
+mod package;
 mod region;
 
 pub use fuse_map::{FuseMap, FuseWriteError};
+pub use package::{
+    ClockResourceId, InputResourceId, PackageError, PackageId, PackagePin, PackageSpec, PadId,
+    PinNumber, PowerRail,
+};
 pub use region::{FuseId, FuseMutability, FuseRegion, FuseRegions, RegionError};

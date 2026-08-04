@@ -104,6 +104,26 @@ fi
 # the experiments exist precisely to vary it (p22v10, g22v10, g22v10cp),
 # and a hardcoded `g22v10` would have compiled them under the wrong one
 # while still producing a plausible .jed.
+# Some experiments measure a REFUSAL. Asking the oracle to use a supply
+# rail as a signal is a real measurement -- it is how "not usable by a
+# design" becomes a checked claim rather than a transcription of a
+# pinout -- but its result is no JEDEC at all. Without a declared
+# expectation those are indistinguishable from a broken wine setup, a
+# missing device library, or a genuinely broken experiment, so a batch
+# re-run of the suite would stop on one and a reader would reasonably
+# conclude the suite was rotten.
+#
+# The declaration lives in the source, beside the reasoning, rather than
+# in a list here that could drift away from it.
+expect_refusal=no
+# Matched on its own line, optionally after a comment opener, so the
+# marker can sit inside a CUPL comment where the compiler ignores it.
+# Prose mentioning the words mid-line does not match -- see
+# marker-inert.pld, which says them inline and must still compile.
+if grep -q '^[[:space:]]*\(/\*[[:space:]]*\)\?EXPECT[[:space:]]\{1,\}refusal[[:space:]]*$' "$source_file"; then
+    expect_refusal=yes
+fi
+
 device="$(sed -n 's/^[[:space:]]*Device[[:space:]]\{1,\}\([A-Za-z0-9]\{1,\}\)[[:space:]]*;.*/\1/p' "$source_file" | head -1)"
 if [[ -z "$device" ]]; then
     printf 'no Device declaration in %s\n' "$source_file" >&2
@@ -133,9 +153,25 @@ JSON
 
 WINEPREFIX="$DECPLD_WINEPREFIX" wine cmd /c "$inner" >"$work/cupl.log" 2>&1 || true
 
-if [[ ! -f "$work/${experiment}.jed" ]]; then
-    printf 'no JEDEC produced; see %s/cupl.log\n' "$work" >&2
-    exit 1
+if [[ -f "$work/${experiment}.jed" ]]; then
+    if [[ "$expect_refusal" == yes ]]; then
+        printf '%s declares EXPECT refusal but the oracle accepted it and produced a JEDEC.\n' \
+            "$experiment" >&2
+        printf 'That is a failed measurement, not a passing one: see %s\n' "$work" >&2
+        exit 1
+    fi
+    printf '%s\n' "$work"
+    exit 0
 fi
 
-printf '%s\n' "$work"
+if [[ "$expect_refusal" == yes ]]; then
+    # The refusal IS the result. Report it on stdout so a batch run reads
+    # as data rather than as breakage, and leave the log for inspection.
+    printf 'refused as expected; see %s/cupl.log\n' "$work"
+    exit 0
+fi
+
+printf 'no JEDEC produced; see %s/cupl.log\n' "$work" >&2
+printf 'if this experiment is meant to be refused, declare "EXPECT refusal" in %s\n' \
+    "$source_file" >&2
+exit 1

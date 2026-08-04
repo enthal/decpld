@@ -7,7 +7,7 @@
 //! tests that trusted it and this is where to look.
 
 use decpld_atf22v10::*;
-use decpld_device::{FuseId, FuseMap, FuseMutability};
+use decpld_device::{FuseId, FuseMap, FuseMutability, PinNumber};
 
 const G: Atf22v10Geometry = Atf22v10Geometry;
 

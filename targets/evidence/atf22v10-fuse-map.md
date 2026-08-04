@@ -178,11 +178,63 @@ Experiment: `global-ar-sp`.
 
 ## Evidence level
 
-`DifferentiallyVerified` for everything above except where noted: each fact comes from a controlled WinCUPL experiment, and the region boundaries are additionally `OpenSourceCrossChecked` against Galette (`af52987`) and GALasm (`c376d56`) and confirmed by the datasheet. None of it is `HardwareVerified` — nothing here has been programmed onto a physical part.
+This statement governs **every claim in this document**, including the sections below it and the summary at the end.
 
-WinCUPL is one witness, not an authority. Where it is the *only* witness — the column map, S0/S1 semantics, the pair ordering — the claim stands on triangulation between the experiments themselves rather than on WinCUPL being correct.
+`DifferentiallyVerified` for everything except where noted: the fact comes from a controlled WinCUPL experiment. The region boundaries are additionally `OpenSourceCrossChecked` against Galette (`af52987`) and GALasm (`c376d56`) and confirmed by the datasheet.
+
+`DatasheetSpecified` (SPEC.md §13.1) for the parts of [Pin roles](#pin-roles-the-dip-24-package) that only the datasheet can supply: each pin's name and function, which rail pin 12 and pin 24 are, and pin 4's power-down role. No fuse experiment can observe what a pin is bonded to. Everything in that section stated as *behaviour* — pin 1 serving both roles at once, an I/O pin reaching the array through its feedback column, the two rails being refused as signals — is `DifferentiallyVerified` in the usual way.
+
+None of it is `HardwareVerified`. Nothing here has been programmed onto a physical part.
+
+WinCUPL is one witness, not an authority. Where it is the *only* witness — the column map, S0/S1 semantics, the pair ordering, and pin 1 serving as clock and array input simultaneously — the claim stands on triangulation between the experiments themselves rather than on WinCUPL being correct.
 
 The array's fuse addressing is WinCUPL-only in the same way, and is the one claim here with an independent implementation to check against: Galette and GALasm both encode row·44 + column. That makes it `OpenSourceCrossChecked` in addition to `DifferentiallyVerified`.
+
+## Pin roles: the DIP-24 package
+
+Pin roles are the one part of this document the datasheet is authoritative for. What a pin is *called* and what it is *bonded to* is a fact about the package, not something a compiler's output reveals — so `atf22v10c-datasheet` Table 2-1 "Pin Configurations" and Figure 2-2 "DIP/SOIC" are the source:
+
+| pins | 1 | 2–3 | 4 | 5–11 | 12 | 13 | 14–23 | 24 |
+|---|---|---|---|---|---|---|---|---|
+| datasheet name | CLK/IN | IN | IN/PD | IN | GND | IN | I/O | VCC |
+
+Table 2-1's legend defines the names: CLK is Clock, IN is Logic Inputs, I/O is Bi-directional Buffers, GND is Ground, VCC is +5V Supply, PD is Power-down.
+
+What the datasheet cannot settle is how the compiler may *use* those pins, and that is what the model encodes. Three claims were measured.
+
+### Pin 1 is a clock and an array input at the same time
+
+`CLK/IN` could mean either role or both. Experiment `clk-shared` drives a registered output on pin 23 from pin 1: the design needs the clock, and the data term needs pin 1 as a literal. It compiles, leaving fuse 88 intact — column 0, pin 1's true column — with pin 23's architecture pair reading S0 = 1, S1 = 0, active high and registered.
+
+So the roles are simultaneous, not alternative. A model that made them alternatives would reject that design with a resource error, and the error would be the compiler's, not the user's.
+
+### Every I/O pin can be an input, through its own feedback column
+
+Experiments `ioin14` … `ioin23`. Each drives one I/O pin from a *different* I/O pin that is never itself driven. The literal lands on the undriven pin's macrocell feedback column in every case:
+
+| undriven pin | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| intact fuse | 126 | 122 | 118 | 114 | 110 | 106 | 102 | 98 | 94 | 486 |
+| written extent | 44–131 | 44–131 | 44–131 | 44–131 | 44–131 | 44–131 | 44–131 | 44–131 | 44–131 | 440–527 |
+| column | 38 | 34 | 30 | 26 | 22 | 18 | 14 | 10 | 6 | 2 |
+
+Addresses first, columns derived — the same discipline as [Fuse addressing](#fuse-addressing-the-array-is-row-major-stride-44), because a table of columns alone is not re-derivable from a fresh run. Nine of the ten drive pin 23 and so write its block, 44–131, with the literal in row 2. `ioin23` is the exception: pin 23 is the undriven one there, so it drives pin 22 instead and writes 440–527, pin 22's block, with the literal at 486 = 44·11 + 2.
+
+The columns are identical to the `fb*` sweep's feedback columns. An I/O pin reaching the array as an input therefore uses that macrocell's feedback path rather than a separate input resource — which is why the model gives a pad no input resource of its own, and why "how many inputs does this device have" has no single answer.
+
+All ten were measured rather than generalised from one. The feedback column map runs opposite to the pin numbering, so confirming pin 14 and pin 23 says nothing about the eight between them, and this document has already been wrong once in exactly that shape.
+
+The undriven macrocell is left combinational and active low in every one of the ten (S1 set, S0 clear in its architecture pair), and its output-enable row is left entirely intact. Whether the pin is held off by that row or by the architecture bits is *not* determined by these experiments — an all-intact product term is constantly false, which would disable the output, but no experiment here varies the two independently. The output-enable experiments of SPEC.md §7.4 are still to do.
+
+### Pins 12 and 24 are refused as signals
+
+Experiments `pwr12` and `pwr24` ask WinCUPL to use a supply rail as a signal. It reports `invalid input` and produces no JEDEC, while the otherwise identical `in2` compiles.
+
+That the datasheet calls them GND and VCC is what says *which rail each is* — no fuse experiment can see what a pin is bonded to. That the compiler refuses them is what makes "not usable by a design" a checked claim rather than a transcription of a diagram.
+
+Both declare `EXPECT refusal` on a line of their own, which `run.sh` reads: it reports the refusal as a result and exits 0, so a batch re-run of the suite does not stop on them, and it fails loudly if the oracle ever *accepts* one — an accepted design would mean the claim is wrong, which is the outcome worth shouting about.
+
+The marker sits inside a CUPL comment. `marker-inert` is `in2` carrying the same words and must still compile: `pwr12` and `pwr24` fail for their own reasons, so neither can show that the marker is inert rather than a syntax error being mistaken for the refusal under test.
 
 ## The three JEDEC footprints, and the power-down fuse
 
@@ -285,7 +337,7 @@ Columns 42/43 are the exception the column map turns on: an odd-numbered source 
 
 **The column map is measured on one row and generalised.** Every one of the 22 sources was placed by a design driving pin 23, so every column position comes from that macrocell's first data row. What has been measured in *other* rows is three columns — 4, 8 and 12, in rows 0, 50, 123 and 131 — which is what the invariance argument under [Fuse addressing](#fuse-addressing-the-array-is-row-major-stride-44) rests on. Uniformity across all 132 rows is the natural reading of an AND array and is consistent with everything observed, but it is an inference from four rows, not a measurement of 132.
 
-This table gives each pin's **array columns** and says nothing about its **package role**. Which pin is the clock, which is a power rail, and which carries the power-down input are separate claims needing separate evidence, and none of them is established in this document yet.
+This table gives each pin's **array columns** and says nothing about its **package role**. Which pin is the clock, which is a power rail, and which carries the power-down input are separate claims needing separate evidence — see [Pin roles: the DIP-24 package](#pin-roles-the-dip-24-package).
 
 ### Architecture pairs
 

@@ -12,10 +12,12 @@
 //! device; `decpld-jedec` serialises fuse states.
 
 mod geometry;
+mod packages;
 mod regions;
 
 pub use geometry::{
-    ASYNCHRONOUS_RESET_ROW, ArrayCell, Atf22v10Geometry, COLUMNS, MacrocellIndex, PinNumber, ROWS,
-    RowBlock, SYNCHRONOUS_PRESET_ROW, SignalSource, SourceKind,
+    ASYNCHRONOUS_RESET_ROW, ArrayCell, Atf22v10Geometry, COLUMNS, MacrocellIndex, ROWS, RowBlock,
+    SYNCHRONOUS_PRESET_ROW, SignalSource, SourceKind,
 };
+pub use packages::{DIP24, GLOBAL_CLOCK, dip24};
 pub use regions::{Footprint, FootprintError, regions_for};

@@ -1,0 +1,31 @@
+Name     marker-inert;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Carries run.sh's expected-refusal marker text and MUST STILL COMPILE.
+
+   The marker is what makes pwr12 and pwr24 readable as measurements
+   rather than as breakage. But those two designs fail for their own
+   reasons, so neither can show that the marker itself is inert to CUPL
+   rather than a syntax error being mistaken for the refusal under test.
+   A control that must succeed can.
+
+   This is in2 with the marker added. Expected: a JEDEC identical to
+   in2's, with the literal intact at fuse 92 (pin 2, row 2, column 4).
+
+   The marker text is spelled out below in a form run.sh does NOT match,
+   so this file is not itself treated as an expected refusal -- run.sh
+   requires the words alone on their own line.
+
+   Marker under test:  EXPECT refusal (inline, so it does not match) */
+
+PIN 2 = i0;
+PIN 23 = o0;
+
+o0 = i0;

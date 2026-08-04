@@ -5,7 +5,7 @@
 //! `targets/evidence/atf22v10-fuse-map.md`; each item names its
 //! experiment.
 
-use decpld_device::FuseId;
+use decpld_device::{FuseId, PinNumber};
 
 /// Rows in the AND array.
 ///
@@ -53,22 +53,16 @@ pub struct ArrayCell {
     pub column: u32,
 }
 
-/// A DIP-24 pin number.
-///
-/// PROVISIONAL. SPEC.md §4.6 makes `PinNumber` a device-layer type — the
-/// key of `PackageSpec.pins` — and CLAUDE.md lists it among the
-/// project-wide newtypes. It lives here only until `decpld-device` grows
-/// the package model, at which point this moves and this crate imports
-/// it. Same for [`MacrocellIndex`], which SPEC calls `MacrocellId`, and
-/// for [`ArrayCell`]'s bare `u32` fields: SPEC.md §4.4 types a column as
-/// `MatrixColumn`, and a row is a product-term index, which CLAUDE.md
-/// lists as `ProductTermId`. The named struct stops the two coordinates
-/// being swapped at a call site; it does not stop either being confused
-/// with some other integer, and only newtypes will.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PinNumber(pub u8);
-
 /// A macrocell, indexed 0..10 by *pin ascending* — index 0 is pin 14.
+///
+/// PROVISIONAL. SPEC.md §4.5 calls this `MacrocellId` and CLAUDE.md
+/// lists it among the project-wide newtypes; it moves to
+/// `decpld-device` with `MacrocellSpec`. Same for [`ArrayCell`]'s bare
+/// `u32` fields: SPEC.md §4.4 types a column as `MatrixColumn`, and a
+/// row is a product-term index, which CLAUDE.md lists as
+/// `ProductTermId`. The named struct stops the two coordinates being
+/// swapped at a call site; it does not stop either being confused with
+/// some other integer, and only newtypes will.
 ///
 /// The index is deliberately tied to the pin rather than to either fuse
 /// ordering, because the two fuse orderings disagree with each other and
@@ -240,6 +234,33 @@ impl Atf22v10Geometry {
             return Some(SignalSource { index, kind: SourceKind::Feedback(macrocell) });
         }
         None
+    }
+
+    /// The array source a pin drives, whichever kind of pin it is.
+    ///
+    /// A dedicated input pin answers with its own source; an I/O pin
+    /// answers with its macrocell's feedback source, because that is
+    /// physically the path an undriven I/O pin takes into the array.
+    /// The supply rails answer `None`, as does any pin the package does
+    /// not have.
+    ///
+    /// Evidence for the I/O case: experiments `ioin14` … `ioin23`, each
+    /// driving one I/O pin from a *different*, undriven one. The literal
+    /// lands on the undriven pin's macrocell feedback column in all ten
+    /// — 14→38, 15→34, 16→30, 17→26, 18→22, 19→18, 20→14, 21→10, 22→6,
+    /// 23→2 — matching the `fb*` sweep exactly. All ten were measured
+    /// because the feedback column map runs opposite to the pin
+    /// numbering, so confirming one end says nothing about the other.
+    ///
+    /// This is the question an encoder asks when it turns a literal into
+    /// a fuse, and it is one function rather than two because the caller
+    /// is precisely who does not yet know which kind of pin it holds.
+    #[must_use]
+    pub fn source_of_pin(self, pin: PinNumber) -> Option<SignalSource> {
+        if let Some(macrocell) = self.macrocell_of_pin(pin) {
+            return self.sources().find(|s| s.kind == SourceKind::Feedback(macrocell));
+        }
+        self.sources().find(|s| s.kind == SourceKind::Input(pin))
     }
 
     /// Every signal source, ascending by index.
