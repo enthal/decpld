@@ -94,9 +94,24 @@ fn source_21_is_an_input_not_feedback() {
 
 #[test]
 fn row_blocks_start_where_they_were_measured() {
-    // Measured at pins 23, 22, 20, 17, 14 — spanning the range rather
-    // than clustered at one end.
-    let expected: [(u8, u32); 5] = [(23, 1), (22, 10), (20, 34), (17, 83), (14, 122)];
+    // Every macrocell measured individually.
+    // All ten macrocells, one design each (mc14..mc23). Five of these
+    // were previously interpolated from Galette's table; interpolating
+    // between measured points is still not measuring, and this device
+    // has two fuse orderings running opposite ways — exactly the shape
+    // where an interpolation looks right and is wrong in the middle.
+    let expected: [(u8, u32); 10] = [
+        (14, 122),
+        (15, 111),
+        (16, 98),
+        (17, 83),
+        (18, 66),
+        (19, 49),
+        (20, 34),
+        (21, 21),
+        (22, 10),
+        (23, 1),
+    ];
     for (pin, first_row) in expected {
         let macrocell = G.macrocell_of_pin(PinNumber(pin)).expect("an I/O pin");
         let block = G.row_block(macrocell).expect("a block");
@@ -108,8 +123,19 @@ fn row_blocks_start_where_they_were_measured() {
 fn architecture_pairs_run_opposite_to_row_blocks() {
     // The reversal, stated as the thing it is: j = 9 - i. The single
     // most likely place for this mapping to be silently transposed,
-    // measured at the same five points as the row blocks.
-    let expected: [(u8, u32); 5] = [(23, 5808), (22, 5810), (20, 5814), (17, 5820), (14, 5826)];
+    // measured for every macrocell rather than at its ends.
+    let expected: [(u8, u32); 10] = [
+        (23, 5808),
+        (22, 5810),
+        (21, 5812),
+        (20, 5814),
+        (19, 5816),
+        (18, 5818),
+        (17, 5820),
+        (16, 5822),
+        (15, 5824),
+        (14, 5826),
+    ];
     for (pin, s0) in expected {
         let macrocell = G.macrocell_of_pin(PinNumber(pin)).expect("an I/O pin");
         let pair = G.architecture_pair(macrocell).expect("a pair");

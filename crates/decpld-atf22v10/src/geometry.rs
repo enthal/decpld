@@ -155,12 +155,23 @@ impl Atf22v10Geometry {
     /// The rows belonging to a macrocell: the OE row first, then its
     /// data rows.
     ///
-    /// Evidence: measured at pins 23 (rows 1–9), 22 (rows 10–20), 20
-    /// (from row 34), 17 (from row 83) and 14 (from row 122). The
-    /// per-block extents come from Galette's `OLMC_ROWS_22V10` and
-    /// `OLMC_SIZE_22V10`, cross-checked against those five measurements
-    /// and against the datasheet's Figure 1-1 "8 TO 16 PRODUCT TERMS"
-    /// (block size minus the OE row gives 8..16).
+    /// Evidence: **all ten measured**, one design per macrocell
+    /// (`mc14`…`mc23`, with pins 22 and 23 additionally covered by
+    /// `fb22` and `arch-comb-high`). The first row of each block is
+    /// where that design's OE term appears.
+    ///
+    /// The measured table is identical to Galette's `OLMC_ROWS_22V10`,
+    /// which is a cross-check rather than the source: an earlier version
+    /// of this file adopted Galette's table with only five macrocells
+    /// measured and the rest interpolated. Interpolating between
+    /// measured points is still not measuring, and this device's two
+    /// fuse orderings run in opposite directions — precisely the shape
+    /// where an interpolation looks right and is wrong in the middle.
+    ///
+    /// Sizes follow from contiguity: block *i* ends where block *i−1*
+    /// begins, and the topmost ends at row 131. They agree with
+    /// Galette's `OLMC_SIZE_22V10` and with the datasheet's Figure 1-1
+    /// "8 TO 16 PRODUCT TERMS" (size minus the OE row gives 8..16).
     ///
     /// Row blocks ascend with the pin: index 0 (pin 14) is at row 122,
     /// index 9 (pin 23) at row 1. This is the **opposite** direction
@@ -180,10 +191,10 @@ impl Atf22v10Geometry {
 
     /// The two architecture fuses of a macrocell: S0 then S1.
     ///
-    /// Evidence: pair index descends from pin 23, measured at pins 23,
-    /// 22, 20, 17 and 14 — the same five points as the row blocks, which
-    /// is how the reversal between the two orderings was established
-    /// rather than inferred.
+    /// Evidence: pair index descends from pin 23, measured for **all
+    /// ten** macrocells (`mc14`…`mc23`) — the same designs that fix the
+    /// row blocks, which is how the reversal between the two orderings
+    /// is established at every point rather than at its ends.
     #[must_use]
     pub fn architecture_pair(self, macrocell: MacrocellIndex) -> Option<ArchitecturePair> {
         let pin = self.macrocell_pin(macrocell)?;

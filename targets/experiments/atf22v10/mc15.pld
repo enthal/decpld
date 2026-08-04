@@ -1,0 +1,17 @@
+Name     mc15;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Which row block and which S0/S1 pair belong to pin 15?
+   With mc14/mc17/mc20 and the pin 22/23 designs, this completes
+   all ten macrocells, so neither table is interpolated. */
+PIN 2  = i0;
+PIN 15 = o0;
+
+o0 = i0;
