@@ -1760,6 +1760,39 @@ pub struct MacrocellConfig {
 }
 ```
 
+```rust
+pub struct LogicalOutputId(pub u32);
+
+pub struct PlacedCube {
+    pub row: ProductTermId,
+    pub cube: Cube,
+}
+
+pub struct PhysicalDesign {
+    pub device: &'static str,
+    pub package: PackageId,
+    pub macrocells: Vec<MacrocellConfig>,
+    /// Terms belonging to no macrocell — a device-wide reset or preset.
+    pub global_terms: Vec<PlacedCube>,
+}
+```
+
+`PhysicalDesign` is what `encode` turns into fuses and `decode` recovers from them, and comparing one with the design a compiler intended is §12.1's round-trip. It carries no derived or presentational state: two designs are equal when they describe the same chip.
+
+**A device has two "empty" product-term states and they are opposites.** All links *blown* — the state an erased part is in — is a term with no literals, the empty AND, constantly **true**. All links *intact* is every literal at both polarities, constantly **false**. Because a sum ORs its terms, an unused row left in the erased state contributes a constantly-true term and drives its output permanently high, so **encoding a design writes every row the device has**, turning unused ones off.
+
+```rust
+pub fn disable_row(map: &mut FuseMap, matrix: &AndMatrixSpec, row: ProductTermId)
+    -> Result<(), EncodeError>;
+pub fn row_is_never_true(cube: &Cube) -> bool;
+```
+
+Turning a row off is deliberately *not* expressible through `encode_cube`, which refuses a contradictory cube. That refusal is right for a design — a designer writing `a & !a` has made a mistake worth reporting — while here the never-true state is the intent. The two callers want opposite answers about the same fuses, so they get different names rather than a flag.
+
+A term may only be placed in a row its own macrocell owns. Without that rule an output's equation can land on another output's pin, and every layer below encodes it faithfully.
+
+`decode` reports a row that can never be true as **absent** rather than present-and-unsatisfiable: `oe_term: None` is a pad nobody drives, and an unused data row is omitted rather than burying a design's real equations under eight to sixteen dead terms per macrocell. `assigned_signal` is `None` for a decoded design — a part read back from fuses knows which macrocell drives which pin and cannot know what the designer called it.
+
 `supports` consults the capability flags rather than `mode_field`, because the two can legitimately disagree: a mode a device reaches without a fuse is supported and not encodable. A fitter asks `supports`; an encoder asks the field, and gets an error if it asks for something unstorable.
 
 ## 4.6 Packages

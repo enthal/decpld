@@ -4,7 +4,10 @@
 //! zero or one. Above it a macrocell is registered or combinational;
 //! here that is a bit pattern, and which pattern is a measured fact.
 
-use crate::{ClockResourceId, FuseId, FuseMap, FuseWriteError, MacrocellId, PadId, ProductTermId};
+use crate::{
+    ClockResourceId, FuseId, FuseMap, FuseWriteError, MacrocellId, PackageId, PadId, ProductTermId,
+};
+use decpld_logic::Cube;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Identifies a configuration field within a device.
@@ -269,4 +272,49 @@ impl MacrocellSpec {
             MacrocellMode::InputOnly => self.supports_input_only,
         }
     }
+}
+
+/// Identifies a logical output of the design a fitter placed.
+///
+/// Absent when a design came from fuses rather than from source: a
+/// decoded part knows which macrocell drives which pin, and cannot know
+/// what the designer called it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LogicalOutputId(pub u32);
+
+/// A cube placed in a specific product-term row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlacedCube {
+    pub row: ProductTermId,
+    pub cube: Cube,
+}
+
+/// One macrocell's configuration in a physical design. SPEC.md §4.5.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MacrocellConfig {
+    pub id: MacrocellId,
+    pub assigned_signal: Option<LogicalOutputId>,
+    pub mode: MacrocellMode,
+    pub polarity: OutputPolarity,
+    pub feedback: FeedbackSource,
+    pub data_terms: Vec<PlacedCube>,
+    pub oe_term: Option<PlacedCube>,
+    pub pad_enabled: bool,
+}
+
+/// A design as the silicon holds it: every macrocell configured, every
+/// product term placed.
+///
+/// The thing `encode` turns into fuses and `decode` recovers from them.
+/// Comparing one of these with the design a compiler intended is
+/// SPEC.md §12.1's round-trip, and it is why the type carries no
+/// derived or presentational state — two designs are equal when they
+/// describe the same chip.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PhysicalDesign {
+    pub device: &'static str,
+    pub package: PackageId,
+    pub macrocells: Vec<MacrocellConfig>,
+    /// Terms belonging to no macrocell — a device-wide reset or preset.
+    pub global_terms: Vec<PlacedCube>,
 }

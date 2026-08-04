@@ -448,6 +448,43 @@ pub fn encode_cube(
     map.set_all(writes).map_err(|source| EncodeError::Fuse { row, source })
 }
 
+/// Turn a product term permanently off.
+///
+/// Connects every link in the row, so the term holds every input at
+/// both polarities and can never be true. That is what an unused row
+/// looks like in a compiled fuse map, and it is a *different* state
+/// from the one an erased part is in: an erased row has every link
+/// blown, which is the empty AND — constantly **true**. A sum of
+/// products ORs its terms, so an unused row left erased would drive its
+/// output permanently high.
+///
+/// Deliberately not expressible through [`encode_cube`], which refuses
+/// a contradictory cube. That refusal is right for a *design*: a
+/// designer writing `a & !a` has made a mistake worth reporting. Here
+/// the never-true state is the intent, so it gets its own name rather
+/// than a special case inside cube encoding — the two callers want
+/// opposite answers to the same fuses.
+pub fn disable_row(
+    map: &mut FuseMap,
+    matrix: &AndMatrixSpec,
+    row: ProductTermId,
+) -> Result<(), EncodeError> {
+    let cells = matrix.row_cells(row).ok_or(EncodeError::UnknownRow { row })?;
+    let writes: Vec<(FuseId, bool)> =
+        cells.iter().map(|cell| (cell.fuse, cell.connected_value)).collect();
+    map.set_all(writes).map_err(|source| EncodeError::Fuse { row, source })
+}
+
+/// Whether a decoded row can never be true.
+///
+/// The companion to [`disable_row`]: a row holding some input at both
+/// polarities is constantly false, whether a compiler wrote it that way
+/// deliberately or a fuse map simply never used it.
+#[must_use]
+pub fn row_is_never_true(cube: &Cube) -> bool {
+    cube.contradiction().is_some()
+}
+
 /// Read a product-term row back out of a fuse map.
 ///
 /// Total over any fuse vector, because `jed inspect` reads files this
