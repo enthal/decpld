@@ -1829,11 +1829,21 @@ Two deviations from the original sketch, both deliberate:
 
 The `L` field's separator between fuse number and fuse states is **required**, not merely conventional. Fuse states are `0` and `1`, which are also decimal digits, so without the separator the field is ambiguous and must be rejected rather than guessed at.
 
+**Cardinality and ordering of `F`.** JEDEC 3A gives `<fuse information> ::= [<default state>] <fuse list> {<fuse list>} [<fuse checksum>]`: at most one `F`, and it precedes every `L`. Both are enforced, because the fuse vector is built from `F` before any `L` is applied — so an `F` arriving late would retroactively become the base for fuse lists written against a different default. An `F` after an `L` is always an error: which fuses it governs depends on reading order.
+
+**Repetition versus contradiction.** For the two fields where a repeat could change what a file means — `F` and `G` — a second field naming the *same* state is a warning, and one naming a *different* state is an error. The distinction is load-bearing: `F0*F0*` has exactly one possible meaning and refusing it would reject a file whose intent is not in doubt, while `F0*F1*` has none. The rule matters most for `G`: the security fuse is irreversible and setting it requires two explicit CLI flags, so resolving a self-contradictory file by last-writer-wins would infer "permanently lock this part" and walk around that gate entirely. A repeated `C` needs no such rule — the checksum is recomputed on every write, and a `C` disagreeing with the fuse data already fails its own check.
+
+**Allocation ceiling.** `QF` alone drives allocation, so an unbounded value turns a 19-byte file into hundreds of megabytes. A device-independent ceiling — this layer knows nothing about devices — rejects absurd counts before allocating. It sits far above any real part and is a guard against malformed input, not a device limit.
+
 Parser modes: strict, compatible, preserve-unknown. Writer styles: canonical, compact, WinCUPL-comparable.
 
 The writer always **recomputes** both checksums rather than copying what the input declared. Both are derived values: the fuse checksum from the fuse data, the transmission checksum from the emitted bytes. Preserving them would propagate a defect — a file carrying `C0000` ("not computed") should leave canonicalisation with a real checksum, and any file whose bytes changed must carry a new transmission checksum or it fails its own verification. The round-trip invariant is therefore stated over a file's *content* — header, fuses, default state, notes, security bit, and unmodelled fields — and not over its checksums or the source positions of its fields.
 
 JEDEC has no escape mechanism, so free text containing `*` cannot be encoded. The writer refuses rather than emitting a file that would silently read back as something else.
+
+**The writer verifies itself.** `write` parses its own output and compares it with the file it was given, and returns an error instead of a string if they differ. This is §5.27's encode-then-decode-then-compare rule applied to the writer rather than only to a test property: a test can only check the cases someone thought to generate, and this check does not depend on anyone having imagined the failure. It costs one extra parse of a file measured in kilobytes.
+
+Two limits on what it proves, both deliberate. It is a *self-consistency* check — the writer against deCPLD's own parser — not a conformance check against JEDEC 3A; any assumption the two share passes silently. And the comparison is made against the file as the writer is entitled to emit it, with value fields hoisted ahead of the programming fields as JEDEC 3A requires, since that reordering is a service to hand-built files rather than a corruption. A round-trip failure is therefore always a deCPLD bug, never a user error, and says so.
 
 Cross-check checksum implementations against WinCUPL, GALasm, Galette, and golden fixtures.
 

@@ -207,18 +207,23 @@ fn diff(before: &Path, after: &Path) -> Result<u8, Failure> {
     let (left_source, right_source) = (read(before)?, read(after)?);
     let (left_name, right_name) = (before.display().to_string(), after.display().to_string());
 
+    // Each file's diagnostics are emitted with that file, before the
+    // next one is touched. Collecting them at the end lost the left
+    // file's warnings whenever the right file failed to parse — the `?`
+    // returned first — so a run that reported nothing about a.jed could
+    // not be told from a run where a.jed was clean.
     let parse_one = |source: &str, name: &str| {
-        parse_with_mode(source, FileId(0), ParserMode::PreserveUnknown).map_err(|bundle| {
-            eprint!("{}", render::bundle(&bundle, name, source));
-            Failure::trouble(format!("{name}: not a valid JEDEC file"))
-        })
+        let result = parse_with_mode(source, FileId(0), ParserMode::PreserveUnknown);
+        let bundle = match &result {
+            Ok(parsed) => &parsed.diagnostics,
+            Err(bundle) => bundle,
+        };
+        eprint!("{}", render::bundle(bundle, name, source));
+        result.map_err(|_| Failure::trouble(format!("{name}: not a valid JEDEC file")))
     };
 
-    let left_parsed = parse_one(&left_source, &left_name)?;
-    let right_parsed = parse_one(&right_source, &right_name)?;
-    eprint!("{}", render::bundle(&left_parsed.diagnostics, &left_name, &left_source));
-    eprint!("{}", render::bundle(&right_parsed.diagnostics, &right_name, &right_source));
-    let (left, right) = (left_parsed.file, right_parsed.file);
+    let left = parse_one(&left_source, &left_name)?.file;
+    let right = parse_one(&right_source, &right_name)?.file;
 
     let delta = decpld_jedec::diff(&left, &right);
     if delta.is_empty() {
@@ -318,6 +323,19 @@ mod tests {
         let out = render_diff(&delta, "a.jed", "b.jed");
         assert!(out.contains("fuse count: 16 -> 32"), "{out}");
         assert!(out.contains("not compared"), "{out}");
+    }
+
+    #[test]
+    fn the_summary_reports_count_default_and_checksum() {
+        // `summarise` was extracted as a pure function precisely so it
+        // could be tested without spawning a process, and then was not
+        // tested. The default state is printed as a digit because that
+        // is how the `F` field spells it.
+        let file =
+            decpld_jedec::parse("\x02h*QF16*F1*L0 0*\x030000", FileId(0)).expect("parses").file;
+        let out = summarise("d.jed", &file);
+        assert!(out.starts_with("d.jed: ok — 16 fuses, default 1, checksum "), "{out}");
+        assert!(out.ends_with(&format!("{:04X}", file.computed_fuse_checksum())), "{out}");
     }
 
     #[test]

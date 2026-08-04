@@ -48,11 +48,23 @@ pub const TRANSMISSION_CHECKSUM_MISMATCH: DiagnosticCode = DiagnosticCode::new(3
 pub const INVALID_DEFAULT_STATE: DiagnosticCode = DiagnosticCode::new(3030);
 /// A `G` field was neither `G0` nor `G1`.
 pub const INVALID_SECURITY_FIELD: DiagnosticCode = DiagnosticCode::new(3031);
-/// More than one `F` field.
+/// More than one `F` field, all naming the same state. A grammar
+/// violation with only one possible meaning, so it is a warning.
 pub const DUPLICATE_DEFAULT_STATE: DiagnosticCode = DiagnosticCode::new(3032);
 /// An `F` field appeared after an `L` field, so which fuses it governs
 /// depends on reading order.
 pub const DEFAULT_STATE_AFTER_FUSE_LIST: DiagnosticCode = DiagnosticCode::new(3033);
+/// Two `F` fields name *different* default states, so the file has no
+/// single meaning. Distinct from [`DUPLICATE_DEFAULT_STATE`]: repetition
+/// is untidy, disagreement is unresolvable.
+pub const CONTRADICTORY_DEFAULT_STATE: DiagnosticCode = DiagnosticCode::new(3034);
+/// More than one `G` field, all naming the same state.
+pub const DUPLICATE_SECURITY_FIELD: DiagnosticCode = DiagnosticCode::new(3035);
+/// Two `G` fields disagree about the security fuse. Never resolved by
+/// last-writer-wins: the security fuse is irreversible, and inferring
+/// "lock the part" from a self-contradictory file is the one guess this
+/// crate must never make.
+pub const CONTRADICTORY_SECURITY_FIELD: DiagnosticCode = DiagnosticCode::new(3036);
 
 /// A field identifier that JEDEC 3A does not define.
 pub const UNKNOWN_FIELD: DiagnosticCode = DiagnosticCode::new(3040);
@@ -81,6 +93,9 @@ pub const ALL: &[DiagnosticCode] = &[
     INVALID_SECURITY_FIELD,
     DUPLICATE_DEFAULT_STATE,
     DEFAULT_STATE_AFTER_FUSE_LIST,
+    CONTRADICTORY_DEFAULT_STATE,
+    DUPLICATE_SECURITY_FIELD,
+    CONTRADICTORY_SECURITY_FIELD,
     UNKNOWN_FIELD,
     FIELD_DISCARDED,
     MISSING_TRANSMISSION_CHECKSUM,

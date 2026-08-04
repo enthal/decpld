@@ -84,8 +84,25 @@ pub fn write(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError>
     // costs one extra parse of a file measured in kilobytes, and it is
     // what stands between `canonicalize` and quietly rewriting a user's
     // fuse map into a different one.
+    //
+    // What it does NOT prove: this is the writer checked against
+    // deCPLD's own parser, so any assumption the two share passes
+    // silently. It is self-consistency, not conformance to JEDEC 3A —
+    // `render` below notes one such blind spot, where the parser's two
+    // passes accept a field order the standard forbids. Conformance
+    // comes from the fixtures and the oracle, not from here.
+    // Compared against the file as the writer is *entitled* to emit it,
+    // not against the caller's exact field order. Hoisting value fields
+    // ahead of the programming fields is required by JEDEC 3A and is a
+    // documented service to hand-built files — so treating it as a
+    // corruption reported "internal error, please report it" for a
+    // caller ordering its own Vec differently. Every other difference
+    // still fails.
+    let mut expected = file.clone();
+    expected.unknown_fields.sort_by_key(|f| !f.is_value_field());
+
     match crate::parse(&text, decpld_diagnostics::FileId(0)) {
-        Ok(parsed) if parsed.file.describes_same_device_as(file) => Ok(text),
+        Ok(parsed) if parsed.file.describes_same_device_as(&expected) => Ok(text),
         _ => Err(WriteError::RoundTripFailed),
     }
 }
@@ -464,8 +481,8 @@ mod tests {
 #[cfg(test)]
 mod review_findings {
     use super::*;
-    use crate::parse;
-    use decpld_diagnostics::FileId;
+    use crate::{JedecField, parse};
+    use decpld_diagnostics::{FileId, Span, TextRange};
 
     const FILE: FileId = FileId(0);
 
@@ -490,6 +507,36 @@ mod review_findings {
         // The fix must not disturb the form the standard prints.
         let file = parse("\x02h*QF8*QP20*F0*\x030000", FILE).expect("parses").file;
         assert!(write(&file, WriterStyle::Canonical).unwrap().contains("QP20*"));
+    }
+
+    #[test]
+    fn a_hand_built_file_with_unhoisted_value_fields_still_writes() {
+        // Found by the second review round. `render` deliberately hoists
+        // value fields ahead of the programming fields, and says so:
+        // "a `JedecFile` built by hand still produces a conformant file".
+        // But the round-trip guard compared against the *unhoisted*
+        // input, and `unknown_fields` is an ordered Vec — so the writer's
+        // own documented service to hand-built files was reported as
+        // `RoundTripFailed`: "internal error … please report it", for
+        // nothing worse than field order.
+        let mut file = parse("\x02h*QF8*F0*L0 11110000*\x030000", FILE).expect("parses").file;
+        file.unknown_fields = vec![
+            JedecField {
+                identifier: "V".to_owned(),
+                body: "0001 XXXX".to_owned(),
+                span: Span::new(FILE, TextRange::empty_at(0)),
+            },
+            JedecField {
+                identifier: "QP".to_owned(),
+                body: "20".to_owned(),
+                span: Span::new(FILE, TextRange::empty_at(0)),
+            },
+        ];
+
+        let written = write(&file, WriterStyle::Canonical).expect("hoisting is not a corruption");
+        let qp = written.find("QP20*").expect("QP retained");
+        let v = written.find("V0001").expect("V retained");
+        assert!(qp < v, "the value field must be hoisted:\n{written}");
     }
 
     #[test]

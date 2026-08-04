@@ -11,13 +11,25 @@ pub struct LineCol {
     pub column: u32,
 }
 
-/// A multi-byte character's position and how much wider than one byte it
-/// is. Only non-ASCII characters are recorded, so ASCII source costs
-/// nothing beyond the line table.
+/// An indivisible run of bytes that occupies fewer columns than it does
+/// bytes, and how much wider than one byte it is.
+///
+/// Two things qualify, for one reason: a non-ASCII character, and a
+/// `\r\n` pair. Both are *one* unit that a byte offset can land in the
+/// middle of, and in both cases an interior offset has no column of its
+/// own — it belongs to the unit that starts earlier. Recording them in
+/// one table is what keeps the two cases from drifting apart, which is
+/// how the CRLF half came to be missing.
+///
+/// Only these are recorded, so pure-ASCII LF source costs nothing beyond
+/// the line table.
 #[derive(Clone, Copy, Debug)]
-struct MultiByteChar {
+struct MultiByteUnit {
     offset: u32,
     extra_bytes: u32,
+    /// `extra_bytes` for this unit plus every earlier one, so a prefix
+    /// sum is a binary search rather than a walk.
+    cumulative_extra: u32,
 }
 
 /// Byte-offset → line/column lookup for one source file.
@@ -29,7 +41,9 @@ pub struct LineIndex {
     /// Byte offset of each line start. Always begins with 0, so there is
     /// always at least one line even in empty source.
     line_starts: Vec<u32>,
-    multibyte: Vec<MultiByteChar>,
+    /// Ascending by `offset`, non-overlapping — which is what lets every
+    /// lookup below be a binary search.
+    units: Vec<MultiByteUnit>,
     len: u32,
 }
 
@@ -37,7 +51,12 @@ impl LineIndex {
     #[must_use]
     pub fn new(text: &str) -> Self {
         let mut line_starts = vec![0];
-        let mut multibyte = Vec::new();
+        let mut units: Vec<MultiByteUnit> = Vec::new();
+        let mut running_extra = 0u32;
+        let mut record = |offset: u32, extra_bytes: u32, units: &mut Vec<MultiByteUnit>| {
+            running_extra += extra_bytes;
+            units.push(MultiByteUnit { offset, extra_bytes, cumulative_extra: running_extra });
+        };
 
         // `\r\n`, a bare `\n`, and a bare `\r` are each ONE terminator.
         //
@@ -55,34 +74,60 @@ impl LineIndex {
                     if chars.peek().is_some_and(|&(_, next)| next == '\n') {
                         chars.next();
                         line_starts.push(offset + 2);
+                        // Two bytes, one terminator: an offset on the LF
+                        // is interior to it and must snap back to the CR,
+                        // exactly as for a multi-byte character. Without
+                        // this the LF reported a column one past the end
+                        // of an already-ended line.
+                        record(offset, 1, &mut units);
                     } else {
                         line_starts.push(offset + 1);
                     }
                 }
                 _ if ch.len_utf8() > 1 => {
-                    multibyte.push(MultiByteChar { offset, extra_bytes: ch.len_utf8() as u32 - 1 });
+                    record(offset, ch.len_utf8() as u32 - 1, &mut units);
                 }
                 _ => {}
             }
         }
 
-        Self { line_starts, multibyte, len: text.len() as u32 }
+        Self { line_starts, units, len: text.len() as u32 }
     }
 
-    /// Snap `offset` back to the start of the character containing it.
+    /// Index of the first unit starting at or after `offset`.
+    fn unit_partition(&self, offset: u32) -> usize {
+        self.units.partition_point(|unit| unit.offset < offset)
+    }
+
+    /// Total `extra_bytes` of every unit starting strictly before
+    /// `offset`.
+    fn extra_before(&self, offset: u32) -> u32 {
+        match self.unit_partition(offset) {
+            0 => 0,
+            index => self.units[index - 1].cumulative_extra,
+        }
+    }
+
+    /// Snap `offset` back to the start of the unit containing it.
     ///
-    /// An offset landing *inside* a multi-byte character has no column
-    /// of its own — it is part of the character that starts earlier.
-    /// Without this the column arithmetic subtracted a full character's
-    /// width from a partial offset and underflowed, which panicked in
-    /// debug and produced a column near `u32::MAX` in release. Callers
-    /// reach this whenever a byte offset comes from outside the parser:
-    /// an editor position, a fuzzer, a future lexer.
-    fn snap_to_character_start(&self, offset: u32) -> u32 {
-        self.multibyte
-            .iter()
-            .find(|mb| mb.offset < offset && offset < mb.offset + mb.extra_bytes + 1)
-            .map_or(offset, |mb| mb.offset)
+    /// An offset landing *inside* a multi-byte character, or on the LF of
+    /// a `\r\n`, has no column of its own — it belongs to the unit that
+    /// starts earlier. Without this the column arithmetic subtracted a
+    /// full unit's width from a partial offset and underflowed, which
+    /// panicked in debug and produced a column near `u32::MAX` in
+    /// release. Callers reach it whenever a byte offset comes from
+    /// outside the parser: an editor position, a fuzzer, a future lexer.
+    ///
+    /// Binary search rather than a scan: this runs once per rendered
+    /// diagnostic, and a language server converts positions constantly.
+    fn snap_to_unit_start(&self, offset: u32) -> u32 {
+        match self.unit_partition(offset) {
+            0 => offset,
+            index => {
+                let unit = self.units[index - 1];
+                if offset < unit.offset + unit.extra_bytes + 1 { unit.offset } else { offset }
+            }
+        }
     }
 
     /// The 1-based line and character column of `offset`.
@@ -92,21 +137,18 @@ impl LineIndex {
     /// the end, and the error path is the worst place to panic.
     #[must_use]
     pub fn line_col(&self, offset: u32) -> LineCol {
-        let offset = self.snap_to_character_start(offset.min(self.len));
+        let offset = self.snap_to_unit_start(offset.min(self.len));
         // `partition_point` gives the count of line starts at or before
         // `offset`; that count minus one is the 0-based line.
         let line_index = self.line_starts.partition_point(|&start| start <= offset) - 1;
         let line_start = self.line_starts[line_index];
 
-        // Each multi-byte character between the line start and `offset`
+        // Each multi-byte unit between the line start and `offset`
         // inflates the byte column by `extra_bytes`; subtract that back
-        // out to get a character column.
-        let extra: u32 = self
-            .multibyte
-            .iter()
-            .filter(|mb| mb.offset >= line_start && mb.offset < offset)
-            .map(|mb| mb.extra_bytes)
-            .sum();
+        // out to get a character column. Two prefix sums rather than a
+        // filtered scan, so the cost is logarithmic in the file's unit
+        // count instead of linear.
+        let extra = self.extra_before(offset) - self.extra_before(line_start);
 
         LineCol { line: line_index as u32 + 1, column: offset - line_start - extra + 1 }
     }
@@ -258,6 +300,83 @@ mod review_findings {
         assert_eq!(index.line_col(4), LineCol { line: 2, column: 1 });
         assert_eq!(index.line_col(8), LineCol { line: 3, column: 1 });
         assert_eq!(index.line_text("one\rtwo\rthree", 2), Some("two"));
+    }
+
+    /// The obvious implementation: walk the text counting lines and
+    /// characters. Correct by inspection and far too slow to ship, which
+    /// makes it exactly the right thing to check the fast one against.
+    fn line_col_by_walking(text: &str, offset: u32) -> LineCol {
+        let target = offset.min(text.len() as u32) as usize;
+        let (mut line, mut column) = (1u32, 1u32);
+        let mut chars = text.char_indices().peekable();
+        while let Some((index, ch)) = chars.next() {
+            // How many bytes the indivisible unit starting here occupies.
+            // A `\r\n` pair is ONE terminator, so it is one unit — the
+            // same treatment a multi-byte character gets.
+            let len = if ch == '\r' && chars.peek().is_some_and(|&(_, next)| next == '\n') {
+                chars.next();
+                2
+            } else {
+                ch.len_utf8()
+            };
+            // An offset anywhere inside a unit belongs to that unit, so
+            // stop before consuming it.
+            if target < index + len {
+                break;
+            }
+            if ch == '\n' || ch == '\r' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+        }
+        LineCol { line, column }
+    }
+
+    #[test]
+    fn an_offset_on_the_lf_of_a_crlf_belongs_to_the_cr() {
+        // Found by the reference test below, not by anyone reasoning
+        // about it. `\r\n` is ONE terminator — the module says so — but
+        // only the multi-byte *character* half of that idea was
+        // implemented, so an offset on the LF was treated as a character
+        // of its own and reported a column one past the end of a line
+        // that had already ended.
+        //
+        // "two" is three characters, so column 4 is the end of the line
+        // and column 5 does not exist.
+        let index = LineIndex::new("one\rtwo\r\nthree\n");
+        assert_eq!(index.line_col(7), LineCol { line: 2, column: 4 }, "the CR itself");
+        assert_eq!(index.line_col(8), LineCol { line: 2, column: 4 }, "the LF snaps back to it");
+        assert_eq!(index.line_col(9), LineCol { line: 3, column: 1 }, "and the next line starts");
+    }
+
+    #[test]
+    fn the_fast_lookup_agrees_with_walking_the_text() {
+        // `line_col` uses binary search over a side table; this pins it
+        // to the definition rather than to itself. Every byte offset is
+        // checked, including those interior to a multi-byte character
+        // and one past the end.
+        let sources = [
+            "",
+            "plain ascii",
+            "a\nb\nc",
+            "one\rtwo\r\nthree\n",
+            "N café*\nQF12*",
+            "\u{1F600}\n\u{1F600}\u{1F600}",
+            "mix\u{e9}d\r\n\u{1F600} tail\rend",
+            "\r\n\r\n\n\r",
+        ];
+        for source in sources {
+            for offset in 0..=source.len() as u32 + 2 {
+                let index = LineIndex::new(source);
+                assert_eq!(
+                    index.line_col(offset),
+                    line_col_by_walking(source, offset),
+                    "source {source:?}, offset {offset}"
+                );
+            }
+        }
     }
 
     #[test]
