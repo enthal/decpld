@@ -27,6 +27,7 @@ clap.workspace = true
 [dev-dependencies]
 decpld-logic.workspace = true
 serde_json.workspace = true
+insta.workspace = true
 
 [lints]
 workspace = true

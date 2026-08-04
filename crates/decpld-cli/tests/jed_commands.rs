@@ -527,3 +527,119 @@ fn inspect_names_the_device_it_needs_when_none_is_given() {
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("--device"), "{}", stderr(&output));
 }
+
+// ---------------------------------------------------------------------
+// `oracle diff` — SPEC.md §7.5.
+// ---------------------------------------------------------------------
+
+#[test]
+fn oracle_diff_explains_what_each_changed_fuse_controls() {
+    // The command's whole reason to exist over `jed diff`: a sentence
+    // rather than an address.
+    let dir = TempDir::new("oracle-diff");
+    let before = dir.write("before.jed", &atf22v10_file());
+    let after = dir.write("after.jed", &atf22v10_variant());
+
+    let output = decpld(&["oracle", "diff", &arg(&before), &arg(&after), "--device", "ATF22V10C"]);
+
+    // A difference is a FINDING, like `jed diff` — exit 1, not 2.
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("device: ATF22V10C"), "{text}");
+    assert!(text.contains("macrocell 9"), "{text}");
+    // All four categories the two designs differ in, each as its own
+    // heading — the grouping is what makes a run readable.
+    for category in ["matrix-data:", "matrix-output-enable:", "mode:", "polarity:"] {
+        assert!(text.contains(category), "missing {category} in:\n{text}");
+    }
+    // And the enable delta names the pin, not just the fuse.
+    assert!(text.contains("output-enable term in product term 1: literal pin 4"), "{text}");
+    // The header is summarised, never echoed.
+    assert!(text.contains("design specification: 1 of 1 line(s) differ"), "{text}");
+}
+
+#[test]
+fn oracle_diff_exits_zero_when_the_files_describe_the_same_device() {
+    let dir = TempDir::new("oracle-diff-same");
+    let file = atf22v10_file();
+    let a = dir.write("a.jed", &file);
+    let b = dir.write("b.jed", &file);
+
+    let output = decpld(&["oracle", "diff", &arg(&a), &arg(&b), "--device", "ATF22V10C"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("describe the same device"), "{}", stdout(&output));
+}
+
+#[test]
+fn oracle_diff_refuses_a_file_for_another_part_as_trouble() {
+    let dir = TempDir::new("oracle-diff-foreign");
+    let ours = dir.write("ours.jed", &atf22v10_file());
+    let theirs = dir.write("theirs.jed", GALETTE);
+
+    // Checked in both positions: the second argument is where it is
+    // easy to miss.
+    for (a, b) in [(&ours, &theirs), (&theirs, &ours)] {
+        let output = decpld(&["oracle", "diff", &arg(a), &arg(b), "--device", "ATF22V10C"]);
+        assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+        assert!(stderr(&output).contains("2194"), "{}", stderr(&output));
+    }
+}
+
+/// `atf22v10_file` with the enable gated on pin 3 and the data term on
+/// pin 4 — two categories of change at once.
+fn atf22v10_variant() -> String {
+    use decpld_atf22v10::{
+        Atf22v10Geometry, Footprint, blank_design, bool_input_of_source, encode_design,
+    };
+    use decpld_device::{
+        MacrocellId, MacrocellMode, OutputPolarity, PinNumber, PlacedCube, ProductTermId,
+    };
+    use decpld_jedec::{FuseVector, JedecFile, WriterStyle, write};
+    use decpld_logic::{Cube, Literal, Polarity};
+
+    let geometry = Atf22v10Geometry;
+    let mut design = blank_design().expect("a blank design");
+    let macrocell = geometry.macrocell_of_pin(PinNumber(23)).expect("an I/O pin");
+    let block = geometry.row_block(macrocell).expect("a measured block");
+    let literal = |pin: u8, polarity| {
+        let source = geometry.source_of_pin(PinNumber(pin)).expect("a signal pin");
+        Literal::new(bool_input_of_source(source.index), polarity)
+    };
+    let cell = design
+        .macrocells
+        .iter_mut()
+        .find(|cell| cell.id == MacrocellId(macrocell.0))
+        .expect("present");
+    // Deliberately different from `atf22v10_file` in every category the
+    // classifier has: mode, polarity, the enable term, and the data
+    // term. A variant that differed in only one would make the grouped
+    // report indistinguishable from an ungrouped list.
+    cell.mode = MacrocellMode::Combinational;
+    cell.polarity = OutputPolarity::ActiveHigh;
+    cell.oe_term = Some(PlacedCube {
+        row: ProductTermId(block.output_enable_row),
+        cube: Cube::new([literal(4, Polarity::True)]),
+    });
+    cell.data_terms = vec![PlacedCube {
+        row: ProductTermId(block.data_rows.start),
+        cube: Cube::new([literal(5, Polarity::True)]),
+    }];
+
+    let fuses = encode_design(&design, Footprint::Gal).expect("encodable");
+    let mut vector = FuseVector::new(fuses.len(), false);
+    for (index, state) in fuses.iter().enumerate() {
+        let index = u32::try_from(index).expect("under six thousand");
+        vector.set(index, state).expect("in range");
+    }
+    let file = JedecFile {
+        design_specification: "variant\n".to_owned(),
+        fuses: vector,
+        default_fuse: Some(false),
+        notes: Vec::new(),
+        security: None,
+        fuse_checksum: None,
+        transmission_checksum: None,
+        unknown_fields: Vec::new(),
+    };
+    write(&file, WriterStyle::Compact).expect("writable")
+}
