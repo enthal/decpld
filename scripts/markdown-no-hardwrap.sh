@@ -34,7 +34,18 @@ if [ "${#files[@]}" -eq 0 ]; then
 fi
 
 awk '
-  FNR == 1 { in_code = 0; prev_nonblank = 0; prev_hardbreak = 0 }
+  FNR == 1 {
+    in_code = 0; prev_nonblank = 0; prev_hardbreak = 0
+    # A leading `---` opens YAML frontmatter (skill and agent definitions
+    # use it). Frontmatter is data, not prose: its `key: value` lines are
+    # not paragraphs and must never be joined.
+    in_front = ($0 ~ /^---[ \t]*$/)
+    if (in_front) next
+  }
+  in_front {
+    if ($0 ~ /^(---|\.\.\.)[ \t]*$/) { in_front = 0 }
+    next
+  }
 
   # Fenced code-block fences toggle code mode; the fence line itself is neutral.
   /^[ \t]*(```|~~~)/ { in_code = !in_code; prev_nonblank = 0; prev_hardbreak = 0; next }
