@@ -126,14 +126,18 @@ Everything above establishes where a block *starts*. Nothing above says what hap
 
 **A sum of *N* distinct single literals is already minimal SOP.** CUPL cannot merge `i0 # i1 # … # i(N-1)` into fewer terms, so *N* literals need exactly *N* product terms — which is what makes the count in the source text a count of rows. Designs reach past the twelve dedicated inputs by using I/O pins as inputs, which `ioin14` … `ioin23` measured.
 
-| experiment | pin | terms | result | rows written | intact links |
+| experiment | pin | terms | result | written extent | intact links |
 |---|---|---|---|---|---|
-| `cap23-8` | 23 | 8 | compiles | 1–9 | 88, 136, 184, 232, 280, 328, 376, 424 |
+| `cap23-8` | 23 | 8 | compiles | 44–439 | 88, 136, 184, 232, 280, 328, 376, 424 |
 | `cap23-9` | 23 | 9 | **refused** | — | — |
-| `cap19-16` | 19 | 16 | compiles | 49–65 | 2200 … 2726, then 2766, 2806, 2846, 2886 |
+| `cap19-16` | 19 | 16 | compiles | 2156–2903 | 2200, 2248, 2296, 2344, 2392, 2440, 2488, 2536, 2584, 2632, 2680, 2726, 2766, 2806, 2846, 2886 |
 | `cap19-17` | 19 | 17 | **refused** | — | — |
-| `cap14-8` | 14 | 8 | compiles | 122–130 | 5412, 5460, 5508, 5556, 5604, 5652, 5700, 5748 |
+| `cap14-8` | 14 | 8 | compiles | 5368–5763 | 5412, 5460, 5508, 5556, 5604, 5652, 5700, 5748 |
 | `cap14-9` | 14 | 9 | **refused** | — | — |
+
+The **written extent** is the column that carries the ownership claim, and it is recorded rather than described. `cap23-8` blows 44–87 (row 1 entire, the always-enabled output-enable term with no literals) and then 89–135, 137–183, … 425–439 — each of rows 2–9 blown but for the one intact link listed. Outside 44–439 nothing is blown. That is what "the block is filled and nothing outside it is written" *looks like*, and without it neither half of the claim is checkable against what is written down. Same shape for the other two: `cap19-16` blows 2156–2199 then each of rows 50–65, and `cap14-8` blows 5368–5411 then each of rows 123–130.
+
+The extents are also the unit [Fuse addressing](#fuse-addressing-the-array-is-row-major-stride-44) argues for, for the reason given there: runs merge across adjacent terms, and an intact link splits one in two, so a count of runs is not a count of terms.
 
 **Row ownership, measured rather than cross-checked.** Each compiling design fills its block exactly: the first row of the block holds the output-enable term and carries no literal, every remaining row holds one, and nothing outside the block is written. Pin 23 gets rows 1–9, pin 19 gets 49–65, pin 14 gets 122–130 — the three blocks being both ends of the map and the widest one in the middle. That is the same answer Galette's tables give, now reached independently.
 
@@ -141,9 +145,13 @@ The intact links land at one literal per row, ascending: `cap23-8` puts pins 1�
 
 **The fit boundary.** Three pairs, each differing by one term. Eight fits on pin 23 and nine does not; sixteen fits on pin 19 and seventeen does not; eight fits on pin 14 and nine does not. Both eight-term ends are measured because the block map runs opposite to the pin numbering and widens toward the middle, so a boundary confirmed at one end says nothing about the other — the shape this document has already been wrong in once.
 
+**What "refused" means here.** `EXPECT refusal` asserts that no JEDEC was produced; the runner does not read the diagnostic, and none is recorded below. The three refusal designs also differ from their compiling partners in two things rather than one — an extra product term *and* the extra `PIN` declaration that term needs — so a CUPL complaint about pin usage would be recorded the same way as one about capacity. The conclusion is well supported by the six designs together, and stating it as a single-variable differential would overstate what the runner checked.
+
 **This is capacity in the true cover, and the distinction is load-bearing.** Every driven macrocell in these designs reads S0 = 1, active high: `cap23-8` sets 5808 and 5809, `cap19-16` sets 5816 and 5817, `cap14-8` sets 5826 and 5827. So WinCUPL implemented each sum directly rather than inverting it — and it *could* have inverted. `!(i0 # … # i8)` is `!i0 & !i1 & … & !i8`, a single product term that fits in one row, so a nine-input OR is implementable on an eight-term macrocell by an active-low output. CUPL does not search for that: `o0 = …` fixes the polarity, and `!o0 = …` is a different design the user has to write.
 
 The number to carry forward is therefore **eight product terms**, not "eight terms of logic". A fitter that selects between true and complement covers (SPEC.md §3.9) will fit designs WinCUPL turns away, and reading these refusals as a bound on *logic* would make that look like a bug.
+
+That CUPL *never* searches for the complement is an inference, not a measurement: its only support is the refusal, which is also what the capacity claim rests on, so one observation is carrying two conclusions. `PIN 23 = !o0;` with the nine-term sum would separate them — if it compiles to a single product term with S0 clear, the complement route is confirmed and the refusal is about row count. That design is not in the suite.
 
 **A fourfold confirmation of the input-only architecture state, arriving sideways.** `cap19-16` borrows pins 14–17 as inputs, and their architecture pairs come back S0 clear, S1 set — 5821, 5823, 5825 and 5827 blown with their S0 partners intact. That is exactly what `ioin14` … `ioin23` recorded for a macrocell used only as an input, reproduced by four cells at once in a design written to measure something else entirely.
 

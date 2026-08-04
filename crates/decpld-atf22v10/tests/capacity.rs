@@ -22,6 +22,27 @@ use decpld_logic::{Cube, Literal, Polarity};
 
 const G: Atf22v10Geometry = Atf22v10Geometry;
 
+/// The blown fuses of a map, as inclusive runs.
+///
+/// The unit the evidence document argues for: "the unit is the
+/// **written extent**". Asserting individual intact fuses proves
+/// nothing on this device — `encode_design` writes every unused row
+/// all-intact, so `Some(false)` at an address is also what an untouched
+/// row holds, and a design with no terms at all satisfies it.
+fn blown_runs(fuses: &decpld_device::FuseMap, end: u32) -> Vec<(u32, u32)> {
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    for fuse in 0..end {
+        if fuses.get(FuseId(fuse)) != Some(true) {
+            continue;
+        }
+        match runs.last_mut() {
+            Some(last) if last.1 + 1 == fuse => last.1 = fuse,
+            _ => runs.push((fuse, fuse)),
+        }
+    }
+    runs
+}
+
 fn literal(pin: u8) -> Literal {
     let source = G.source_of_pin(PinNumber(pin)).expect("a signal pin");
     Literal::new(bool_input_of_source(source.index), Polarity::True)
@@ -91,13 +112,29 @@ fn eight_terms_on_pin_23_reproduce_the_fuses_the_oracle_wrote() {
     let design = sum_of_literals(23, &[1, 2, 3, 4, 5, 6, 7, 8]);
     let fuses = encode_design(&design, Footprint::Gal).expect("eight terms fit");
 
-    for (index, fuse) in [88, 136, 184, 232, 280, 328, 376, 424].into_iter().enumerate() {
-        assert_eq!(fuses.get(FuseId(fuse)), Some(false), "term {index}'s literal at {fuse}");
-    }
-    // The block is written and nothing past it: row 9 ends at 439.
-    for fuse in 440..5808 {
-        assert_eq!(fuses.get(FuseId(fuse)), Some(false), "fuse {fuse} is outside pin 23's block");
-    }
+    // The whole array as blown RUNS, the oracle's own output shape.
+    // Row 1 is entirely blown — the always-enabled output-enable term,
+    // no literals — and each of rows 2-9 is blown but for one intact
+    // link. Nothing outside 44-439 is blown at all, which is the
+    // "nothing outside the block" claim made observable.
+    //
+    // The eight intact addresses on their own proved nothing: every
+    // unused row is written all-intact too, so a design with no data
+    // terms, or one whose terms all encoded as never-true, passed.
+    assert_eq!(
+        blown_runs(&fuses, 5808),
+        [
+            (44, 87),   // row 1, output-enable term: no literals
+            (89, 135),  // row 2, intact at 88  — pin 1
+            (137, 183), // row 3, intact at 136 — pin 2
+            (185, 231), // row 4, intact at 184 — pin 3
+            (233, 279), // row 5, intact at 232 — pin 4
+            (281, 327), // row 6, intact at 280 — pin 5
+            (329, 375), // row 7, intact at 328 — pin 6
+            (377, 423), // row 8, intact at 376 — pin 7
+            (425, 439), // row 9, intact at 424 — pin 8
+        ]
+    );
 }
 
 #[test]
@@ -109,19 +146,33 @@ fn sixteen_terms_fit_the_widest_block_and_fill_it_exactly() {
     let design = sum_of_literals(19, &pins);
     let fuses = encode_design(&design, Footprint::Gal).expect("sixteen terms fit");
 
-    // The oracle's intact links for the first twelve, ascending by row:
-    // pins 1-11 at columns 0..40 in steps of 4, then pin 13 at 42.
-    for (index, fuse) in [2200, 2248, 2296, 2344, 2392, 2440, 2488, 2536, 2584, 2632, 2680, 2726]
-        .into_iter()
-        .enumerate()
-    {
-        assert_eq!(fuses.get(FuseId(fuse)), Some(false), "term {index} at {fuse}");
-    }
-    // Then four I/O pins used as inputs, at their feedback columns
-    // 38, 34, 30, 26 — measured by the `fb*` and `ioin*` sweeps.
-    for (index, fuse) in [2766, 2806, 2846, 2886].into_iter().enumerate() {
-        assert_eq!(fuses.get(FuseId(fuse)), Some(false), "feedback term {index} at {fuse}");
-    }
+    // Rows 49-65 as blown runs. Row 49 is the enable term; rows 50-61
+    // hold pins 1-11 at columns 0-40 and pin 13 at 42; rows 62-65 hold
+    // pins 14-17 at their FEEDBACK columns 38, 34, 30, 26 — the columns
+    // the `fb*` and `ioin*` sweeps recorded, reached here by a design
+    // that needed more inputs than the part has dedicated ones.
+    assert_eq!(
+        blown_runs(&fuses, 5808),
+        [
+            (2156, 2199), // row 49, output-enable term
+            (2201, 2247), // row 50, intact at 2200 — pin 1,  column 0
+            (2249, 2295), // row 51, intact at 2248 — pin 2
+            (2297, 2343), // row 52, intact at 2296 — pin 3
+            (2345, 2391), // row 53, intact at 2344 — pin 4
+            (2393, 2439), // row 54, intact at 2392 — pin 5
+            (2441, 2487), // row 55, intact at 2440 — pin 6
+            (2489, 2535), // row 56, intact at 2488 — pin 7
+            (2537, 2583), // row 57, intact at 2536 — pin 8
+            (2585, 2631), // row 58, intact at 2584 — pin 9
+            (2633, 2679), // row 59, intact at 2632 — pin 10
+            (2681, 2725), // row 60, intact at 2680 — pin 11, column 40
+            (2727, 2765), // row 61, intact at 2726 — pin 13, column 42
+            (2767, 2805), // row 62, intact at 2766 — pin 14 feedback, 38
+            (2807, 2845), // row 63, intact at 2806 — pin 15 feedback, 34
+            (2847, 2885), // row 64, intact at 2846 — pin 16 feedback, 30
+            (2887, 2903), // row 65, intact at 2886 — pin 17 feedback, 26
+        ]
+    );
 }
 
 #[test]
@@ -204,13 +255,30 @@ fn the_measured_capacity_is_capacity_in_the_true_cover() {
     // fit designs the oracle refuses. Asserting the polarity here is
     // what stops the capacity tests above from being read as the
     // stronger claim.
-    let design = sum_of_literals(23, &[1, 2, 3, 4, 5, 6, 7, 8]);
-    let fuses = encode_design(&design, Footprint::Gal).expect("eight terms fit");
-    assert_eq!(fuses.get(FuseId(5808)), Some(true), "pin 23 active high, as the oracle wrote it");
-    assert_eq!(fuses.get(FuseId(5809)), Some(true), "and combinational");
+    // Asserting `true` at 5808 alone would prove nothing: `blank_design`
+    // leaves every macrocell combinational and active high, so all
+    // twenty architecture fuses read 1 in every design this file
+    // builds. The pair has to be made to MOVE.
+    //
+    // So encode the same eight-term design at each polarity and require
+    // 5808 to flip while every other architecture fuse holds. That
+    // pins the pair to pin 23 — under pin-ascending order the change
+    // would land at 5826 — and pins the sense, which is what the
+    // oracle's S0 = 1 reading means.
+    let high = encode_design(&sum_of_literals(23, &[1, 2, 3, 4, 5, 6, 7, 8]), Footprint::Gal)
+        .expect("eight terms fit");
 
-    let design = sum_of_literals(14, &[1, 2, 3, 4, 5, 6, 7, 8]);
-    let fuses = encode_design(&design, Footprint::Gal).expect("eight terms fit");
-    assert_eq!(fuses.get(FuseId(5826)), Some(true), "pin 14's pair is the LAST, not the first");
-    assert_eq!(fuses.get(FuseId(5827)), Some(true));
+    let mut design = sum_of_literals(23, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    design.macrocells.iter_mut().find(|cell| cell.id == MacrocellId(9)).expect("pin 23").polarity =
+        OutputPolarity::ActiveLow;
+    let low = encode_design(&design, Footprint::Gal).expect("polarity does not change the fit");
+
+    assert_eq!(high.get(FuseId(5808)), Some(true), "the oracle's reading: active high");
+    assert_eq!(low.get(FuseId(5808)), Some(false), "and pin 23's S0 is the FIRST pair");
+    for fuse in 5809..5828 {
+        assert_eq!(high.get(FuseId(fuse)), low.get(FuseId(fuse)), "fuse {fuse} must not move");
+    }
+    // The array is untouched by the polarity change, so the capacity
+    // measurement is about rows and this one is about the pair.
+    assert_eq!(blown_runs(&high, 5808), blown_runs(&low, 5808));
 }

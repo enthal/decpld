@@ -290,7 +290,9 @@ impl Atf22v10Geometry {
     /// Galette's `OLMC_SIZE_22V10` and with the datasheet's Figure 1-1
     /// "8 TO 16 PRODUCT TERMS" (size minus the OE row gives 8..16).
     ///
-    /// The sizes are also measured, by filling three blocks: `cap23-8`
+    /// Three of the ten sizes are also measured, by filling them; the
+    /// other seven remain derived from contiguity and cross-checked
+    /// against Galette. `cap23-8`
     /// writes rows 1-9 and stops, `cap19-16` writes 49-65, `cap14-8`
     /// writes 122-130 — both ends of the map and the widest block in
     /// the middle. One term more is refused in each case (`cap23-9`,
