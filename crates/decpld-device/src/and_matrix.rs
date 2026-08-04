@@ -18,6 +18,12 @@ pub struct MatrixColumn(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProductTermId(pub u32);
 
+impl std::fmt::Display for ProductTermId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "product term {}", self.0)
+    }
+}
+
 /// What physically drives a matrix column.
 ///
 /// The device layer's answer to "where does this literal come from",

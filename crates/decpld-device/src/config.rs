@@ -290,6 +290,13 @@ pub struct PlacedCube {
 }
 
 /// One macrocell's configuration in a physical design. SPEC.md §4.5.
+///
+/// There is deliberately no `pad_enabled` field. Whether the pin is
+/// driven is decided entirely by the output-enable term, so a separate
+/// flag would be a second copy of one fact: a design could then carry
+/// `pad_enabled: false` alongside an always-true enable, encode to
+/// fuses that drive the pin, and fail §12.1's round-trip on a
+/// difference no encoder ever wrote. See [`Self::pad_enabled`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MacrocellConfig {
     pub id: MacrocellId,
@@ -299,7 +306,20 @@ pub struct MacrocellConfig {
     pub feedback: FeedbackSource,
     pub data_terms: Vec<PlacedCube>,
     pub oe_term: Option<PlacedCube>,
-    pub pad_enabled: bool,
+}
+
+impl MacrocellConfig {
+    /// Whether this macrocell drives its pin.
+    ///
+    /// Derived, not stored: a pad is driven exactly when an
+    /// output-enable term can be satisfied. An absent term is the
+    /// disabled pad — a term that is present but can never be true is
+    /// spelled the same way after a round-trip, because that is what
+    /// the silicon holds.
+    #[must_use]
+    pub fn pad_enabled(&self) -> bool {
+        self.oe_term.is_some()
+    }
 }
 
 /// A design as the silicon holds it: every macrocell configured, every

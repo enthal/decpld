@@ -11,13 +11,14 @@ use crate::geometry::{ASYNCHRONOUS_RESET_ROW, ROWS};
 use crate::macrocells::{MacrocellError, macrocells};
 use crate::matrix::and_matrix;
 use crate::packages::DIP24;
-use crate::regions::{Footprint, regions_for};
+use crate::regions::{Footprint, FootprintError, regions_for};
 use decpld_device::{
-    ConfigFieldError, DecodeError, EncodeError, FeedbackSource, FuseMap, MacrocellConfig,
-    MacrocellMode, MacrocellSpec, MatrixError, OutputPolarity, PhysicalDesign, PlacedCube,
-    ProductTermId, ProductTermRole, RegionError, decode_row, disable_row, encode_cube,
-    row_is_never_true,
+    AndMatrixSpec, ConfigFieldError, DecodeError, EncodeError, FeedbackSource, FuseMap,
+    MacrocellConfig, MacrocellId, MacrocellMode, MacrocellSpec, MatrixError, OutputPolarity,
+    PhysicalDesign, PlacedCube, ProductTermId, ProductTermRole, RegionError, decode_row,
+    disable_row, encode_cube, row_is_never_true,
 };
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The device id this crate models.
 pub const DEVICE: &str = "ATF22V10C";
@@ -37,15 +38,33 @@ pub enum DesignError {
     Encode(#[from] EncodeError),
     #[error("{0}")]
     Decode(#[from] DecodeError),
+    #[error("{0}")]
+    Footprint(#[from] FootprintError),
     #[error(
-        "macrocell {macrocell} has no product term {row:?}; a term may only be placed in a row \
-         its own macrocell owns"
+        "{macrocell} has no {row} in that role; a term may only be placed in a row its own \
+         macrocell owns, as a data term or as the output enable"
     )]
-    TermNotOwned { macrocell: u8, row: ProductTermId },
-    #[error("{row:?} is not a device-wide term; only the reset and preset rows may be global")]
+    TermNotOwned { macrocell: MacrocellId, row: ProductTermId },
+    #[error("{macrocell} places two terms in {row}")]
+    RowUsedTwice { macrocell: MacrocellId, row: ProductTermId },
+    #[error("{row} is not a device-wide term; only the reset and preset rows may be global")]
     NotAGlobalTerm { row: ProductTermId },
-    #[error("the design describes macrocell {macrocell}, which this device does not have")]
-    NoSuchMacrocell { macrocell: u8 },
+    #[error("{row} is placed as both a device-wide term and a macrocell term")]
+    GlobalRowUsedTwice { row: ProductTermId },
+    #[error("the design describes {macrocell}, which this device does not have")]
+    NoSuchMacrocell { macrocell: MacrocellId },
+    #[error(
+        "the design does not describe {macrocell}; every macrocell must be configured, because \
+         an unconfigured one leaves its product terms erased, and an erased term is constantly \
+         true"
+    )]
+    MacrocellMissing { macrocell: MacrocellId },
+    #[error("the design describes {macrocell} twice")]
+    MacrocellListedTwice { macrocell: MacrocellId },
+    #[error("{macrocell} cannot take feedback from {feedback:?} on this device")]
+    FeedbackNotSupported { macrocell: MacrocellId, feedback: FeedbackSource },
+    #[error("this is an {expected} model; the design is for {device}")]
+    WrongDevice { device: &'static str, expected: &'static str },
 }
 
 /// A design with every macrocell present and nothing configured.
@@ -54,8 +73,13 @@ pub enum DesignError {
 /// [`decode_design`] fills in. Modes and polarities take the values an
 /// erased part holds so that a blank design and an erased device agree
 /// about a macrocell nobody touched.
-pub fn blank_design(footprint: Footprint) -> Result<PhysicalDesign, DesignError> {
-    let _ = regions_for(footprint)?;
+///
+/// # Errors
+///
+/// If the measured tables ever describe a macrocell that violates
+/// [`decpld_device::MacrocellSpec`]'s rules — the same check every
+/// other entry point in this module makes.
+pub fn blank_design() -> Result<PhysicalDesign, DesignError> {
     let specs = macrocells()?;
     Ok(PhysicalDesign {
         device: DEVICE,
@@ -71,14 +95,13 @@ pub fn blank_design(footprint: Footprint) -> Result<PhysicalDesign, DesignError>
                 feedback: FeedbackSource::Pin,
                 data_terms: Vec::new(),
                 oe_term: None,
-                pad_enabled: false,
             })
             .collect(),
         global_terms: Vec::new(),
     })
 }
 
-/// Turn a design into fuses.
+/// Turn a design into fuses, in the given JEDEC footprint.
 ///
 /// **Every row is written, including the ones the design does not use.**
 /// The two "empty" states of this device are opposites and it matters
@@ -94,44 +117,48 @@ pub fn blank_design(footprint: Footprint) -> Result<PhysicalDesign, DesignError>
 /// output permanently high. Unused rows are therefore written to the
 /// never-true state, which is exactly what an unused row looks like in
 /// the oracle's own output.
-pub fn encode_design(design: &PhysicalDesign) -> Result<FuseMap, DesignError> {
-    let footprint = Footprint::Gal;
+///
+/// That is also why the design must describe **every** macrocell rather
+/// than only the ones a fitter placed: the rows to turn off are decided
+/// by the device, not by the design, and a design that quietly omitted
+/// a macrocell would leave ten pins' worth of that decision unmade.
+pub fn encode_design(
+    design: &PhysicalDesign,
+    footprint: Footprint,
+) -> Result<FuseMap, DesignError> {
+    if design.device != DEVICE {
+        return Err(DesignError::WrongDevice { device: design.device, expected: DEVICE });
+    }
+
     let mut map = FuseMap::erased(regions_for(footprint)?);
     let matrix = and_matrix()?;
     let specs = macrocells()?;
 
+    // Index the design by macrocell, refusing a repeat rather than
+    // letting two configurations for one set of rows meet at the fuse
+    // layer — where the complaint would name a fuse and neither the
+    // macrocell nor the duplication.
+    let mut configs_by_macrocell: BTreeMap<MacrocellId, &MacrocellConfig> = BTreeMap::new();
     for cell in &design.macrocells {
-        let spec = specs
-            .iter()
-            .find(|spec| spec.id == cell.id)
-            .ok_or(DesignError::NoSuchMacrocell { macrocell: cell.id.0 })?;
-
-        // A term may only go where its macrocell owns a row. Without
-        // this an output's equation could land on another output's pin,
-        // and every layer below would encode it faithfully.
-        for placed in cell.data_terms.iter().chain(cell.oe_term.iter()) {
-            let owned = spec.data_terms.contains(&placed.row) || spec.oe_term == Some(placed.row);
-            if !owned {
-                return Err(DesignError::TermNotOwned { macrocell: cell.id.0, row: placed.row });
-            }
-            encode_cube(&mut map, &matrix, placed.row, &placed.cube)?;
+        if !specs.iter().any(|spec| spec.id == cell.id) {
+            return Err(DesignError::NoSuchMacrocell { macrocell: cell.id });
         }
-
-        // Every row this macrocell owns that the design did not place a
-        // term in is turned off, so it contributes nothing to the sum.
-        // An untouched row would contribute a constantly-TRUE term
-        // instead, because that is what an erased row is.
-        //
-        // A macrocell with no output-enable term is one whose pad is not
-        // driven, and turning that row off is how this device says so.
-        for &row in spec.data_terms.iter().chain(spec.oe_term.iter()) {
-            let placed = cell.data_terms.iter().chain(cell.oe_term.iter()).any(|p| p.row == row);
-            if !placed {
-                disable_row(&mut map, &matrix, row)?;
-            }
+        if configs_by_macrocell.insert(cell.id, cell).is_some() {
+            return Err(DesignError::MacrocellListedTwice { macrocell: cell.id });
         }
+    }
 
-        encode_macrocell_fields(&mut map, spec, cell)?;
+    // Every row the design placed a term in, so the device-wide rows
+    // can be checked against it. A global term landing in a macrocell's
+    // block would otherwise be caught only as a fuse conflict.
+    let mut placed_rows: BTreeSet<ProductTermId> = BTreeSet::new();
+
+    for spec in &specs {
+        let cell = configs_by_macrocell
+            .get(&spec.id)
+            .copied()
+            .ok_or(DesignError::MacrocellMissing { macrocell: spec.id })?;
+        encode_macrocell(&mut map, &matrix, spec, cell, &mut placed_rows)?;
     }
 
     for placed in &design.global_terms {
@@ -142,13 +169,16 @@ pub fn encode_design(design: &PhysicalDesign) -> Result<FuseMap, DesignError> {
         ) {
             return Err(DesignError::NotAGlobalTerm { row: placed.row });
         }
+        if !placed_rows.insert(placed.row) {
+            return Err(DesignError::GlobalRowUsedTwice { row: placed.row });
+        }
         encode_cube(&mut map, &matrix, placed.row, &placed.cube)?;
     }
 
     // Same for the two device-wide rows.
     for row in [ASYNCHRONOUS_RESET_ROW, SYNCHRONOUS_PRESET_ROW] {
         let id = ProductTermId(row);
-        if !design.global_terms.iter().any(|placed| placed.row == id) {
+        if !placed_rows.contains(&id) {
             disable_row(&mut map, &matrix, id)?;
         }
     }
@@ -156,11 +186,60 @@ pub fn encode_design(design: &PhysicalDesign) -> Result<FuseMap, DesignError> {
     Ok(map)
 }
 
-fn encode_macrocell_fields(
+/// Write one macrocell's terms and architecture bits.
+fn encode_macrocell(
     map: &mut FuseMap,
+    matrix: &AndMatrixSpec,
     spec: &MacrocellSpec,
     cell: &MacrocellConfig,
+    placed_rows: &mut BTreeSet<ProductTermId>,
 ) -> Result<(), DesignError> {
+    if !spec.feedback_modes.contains(&cell.feedback) {
+        return Err(DesignError::FeedbackNotSupported {
+            macrocell: spec.id,
+            feedback: cell.feedback,
+        });
+    }
+
+    // A term may only go where its macrocell owns a row **in that
+    // role**. Ownership alone is not enough: a data term written into
+    // the enable row would silently become the pin's tri-state control,
+    // and decoding would report it back as the enable — a round-trip
+    // that agrees with itself about the wrong thing.
+    let mut used: BTreeSet<ProductTermId> = BTreeSet::new();
+    let data_rows: BTreeSet<ProductTermId> = spec.data_terms.iter().copied().collect();
+    for placed in &cell.data_terms {
+        if !data_rows.contains(&placed.row) {
+            return Err(DesignError::TermNotOwned { macrocell: spec.id, row: placed.row });
+        }
+        if !used.insert(placed.row) {
+            return Err(DesignError::RowUsedTwice { macrocell: spec.id, row: placed.row });
+        }
+        encode_cube(map, matrix, placed.row, &placed.cube)?;
+    }
+
+    if let Some(placed) = &cell.oe_term {
+        if spec.oe_term != Some(placed.row) {
+            return Err(DesignError::TermNotOwned { macrocell: spec.id, row: placed.row });
+        }
+        used.insert(placed.row);
+        encode_cube(map, matrix, placed.row, &placed.cube)?;
+    }
+
+    // Every row this macrocell owns that the design did not place a
+    // term in is turned off, so it contributes nothing to the sum.
+    // An untouched row would contribute a constantly-TRUE term
+    // instead, because that is what an erased row is.
+    //
+    // A macrocell with no output-enable term is one whose pad is not
+    // driven, and turning that row off is how this device says so.
+    for &row in spec.data_terms.iter().chain(spec.oe_term.iter()) {
+        if !used.contains(&row) {
+            disable_row(map, matrix, row)?;
+        }
+    }
+    placed_rows.extend(used);
+
     if let Some(field) = &spec.mode_field {
         field.encode(map, cell.mode)?;
     }
@@ -172,12 +251,22 @@ fn encode_macrocell_fields(
 
 /// Read a whole design back out of a fuse map.
 ///
-/// Total for any map of the right size, because `jed inspect` reads
-/// files this compiler did not write. A row nobody programmed decodes
-/// to the cube its fuses describe — on an erased part, every literal at
-/// both polarities, which is constantly false — rather than being
-/// silently omitted.
+/// Total for any map with one of this device's three fuse counts,
+/// because `jed inspect` reads files this compiler did not write. A row
+/// nobody programmed decodes to the cube its fuses describe — on an
+/// erased part, no literals at all, which is constantly true — rather
+/// than being silently omitted.
+///
+/// A map of any other size is refused by fuse count rather than
+/// half-decoded until a configuration field runs off the end: the
+/// resulting complaint would name a fuse address, when what the user
+/// needs to hear is that the file is for a different part.
 pub fn decode_design(map: &FuseMap) -> Result<PhysicalDesign, DesignError> {
+    // The footprint is an assertion about the map, not a constant: it
+    // is what makes the `device` and `package` this function returns a
+    // claim it has checked rather than one it has assumed.
+    let _footprint = Footprint::from_fuse_count(map.len())?;
+
     let matrix = and_matrix()?;
     let specs = macrocells()?;
 
@@ -214,17 +303,19 @@ pub fn decode_design(map: &FuseMap) -> Result<PhysicalDesign, DesignError> {
             }
             None => None,
         };
-        let pad_enabled = oe_term.is_some();
 
         cells.push(MacrocellConfig {
             id: spec.id,
             assigned_signal: None,
             mode,
             polarity,
+            // No fuse on this device selects a feedback path, and
+            // `macrocells()` advertises exactly one. Encoding refuses
+            // any other value, so this is a report of what the part
+            // does rather than a default standing in for a measurement.
             feedback: FeedbackSource::Pin,
             data_terms,
             oe_term,
-            pad_enabled,
         });
     }
 

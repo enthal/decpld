@@ -1478,8 +1478,17 @@ pub trait DeviceTarget: Send + Sync {
         constraints: &PhysicalConstraints,
     ) -> Result<PhysicalDesign, FitError>;
 
-    fn encode(&self, design: &PhysicalDesign) -> Result<FuseMap, EncodeError>;
-    fn decode(&self, fuses: &FuseMap) -> Result<PhysicalDesign, DecodeError>;
+    /// Why this target could not encode or decode a whole design.
+    ///
+    /// Not `EncodeError`/`DecodeError`: those are §4.4's *row* errors, and a
+    /// whole-design failure is usually about the design — a macrocell missing,
+    /// a term in a row its macrocell does not own in that role, a fuse count
+    /// belonging to another part. A target's error type wraps the row errors
+    /// and adds its own.
+    type DesignError: std::error::Error;
+
+    fn encode(&self, design: &PhysicalDesign) -> Result<FuseMap, Self::DesignError>;
+    fn decode(&self, fuses: &FuseMap) -> Result<PhysicalDesign, Self::DesignError>;
     fn jedec_metadata(&self) -> JedecDeviceMetadata;
 }
 ```
@@ -1756,7 +1765,11 @@ pub struct MacrocellConfig {
     pub feedback: FeedbackSource,
     pub data_terms: Vec<PlacedCube>,
     pub oe_term: Option<PlacedCube>,
-    pub pad_enabled: bool,
+}
+
+impl MacrocellConfig {
+    /// Derived: a pad is driven exactly when an output-enable term is present.
+    pub fn pad_enabled(&self) -> bool;
 }
 ```
 
@@ -1777,7 +1790,7 @@ pub struct PhysicalDesign {
 }
 ```
 
-`PhysicalDesign` is what `encode` turns into fuses and `decode` recovers from them, and comparing one with the design a compiler intended is §12.1's round-trip. It carries no derived or presentational state: two designs are equal when they describe the same chip.
+`PhysicalDesign` is what `encode` turns into fuses and `decode` recovers from them, and comparing one with the design a compiler intended is §12.1's round-trip. It carries no derived or presentational state: two designs are equal when they describe the same chip. **`pad_enabled` is therefore a method, not a field.** Whether a pin is driven is decided entirely by the output-enable term, so storing it separately would be a second copy of one fact — and a design carrying `pad_enabled: false` beside an always-true enable would encode to fuses that drive the pin and then fail §12.1's round-trip on a difference no encoder ever wrote.
 
 **A device has two "empty" product-term states and they are opposites.** All links *blown* — the state an erased part is in — is a term with no literals, the empty AND, constantly **true**. All links *intact* is every literal at both polarities, constantly **false**. Because a sum ORs its terms, an unused row left in the erased state contributes a constantly-true term and drives its output permanently high, so **encoding a design writes every row the device has**, turning unused ones off.
 
@@ -1789,7 +1802,13 @@ pub fn row_is_never_true(cube: &Cube) -> bool;
 
 Turning a row off is deliberately *not* expressible through `encode_cube`, which refuses a contradictory cube. That refusal is right for a design — a designer writing `a & !a` has made a mistake worth reporting — while here the never-true state is the intent. The two callers want opposite answers about the same fuses, so they get different names rather than a flag.
 
-A term may only be placed in a row its own macrocell owns. Without that rule an output's equation can land on another output's pin, and every layer below encodes it faithfully.
+A term may only be placed in a row its own macrocell owns, **and in the role that row has**. Ownership alone is not enough: a data term written into its own macrocell's output-enable row would silently become the pin's tri-state control, and `decode` would report it back as the enable — a round-trip that agrees with itself about the wrong thing. The two directions are checked separately, so a predicate that accepts everything in one of them cannot pass.
+
+**`encode` requires the design to describe every macrocell the device has.** Which rows to turn off is decided by the device, not by the design, so a design that named only the macrocells a fitter placed would leave the rest erased — that is, constantly true — and drive their pins permanently high. A missing macrocell is refused rather than defaulted: a caller that never learns its design was incomplete has been handed a part that does not implement it. A macrocell named twice, a row placed twice within one macrocell, and a macrocell the device does not have are refused by name for the same reason — left to the fuse layer they surface as "two encoders disagree about fuse 88", which identifies neither the macrocell nor the mistake.
+
+`encode` also refuses a design whose `device` is not the target's, and a `feedback` the macrocell's `feedback_modes` do not list. A field no fuse on the device encodes must be rejected rather than written nowhere and decoded back as the default, which would report a successful round-trip on a design the silicon does not implement.
+
+`decode` is total over any map with one of the device's fuse counts, and refuses any other **by fuse count**, before decoding anything. `jed inspect` reads files this compiler did not write, and a foreign file half-decoded until a configuration field runs off the end produces a complaint that names a fuse address when what the user needs to hear is that the file is for a different part. Checking the count first is also what makes the `device` and `package` that `decode` returns a claim it has verified rather than a constant.
 
 `decode` reports a row that can never be true as **absent** rather than present-and-unsatisfiable: `oe_term: None` is a pad nobody drives, and an unused data row is omitted rather than burying a design's real equations under eight to sixteen dead terms per macrocell. `assigned_signal` is `None` for a decoded design — a part read back from fuses knows which macrocell drives which pin and cannot know what the designer called it.
 
@@ -1893,6 +1912,40 @@ pub fn atf22v10c() -> PalGalDevice {
 ```
 
 Do not enter uncertain numeric fuse positions from memory. Each mapping must cite its evidence in source comments and have fixtures.
+
+Whole-design entry points, ahead of the `DeviceTarget` implementation:
+
+```rust
+pub const DEVICE: &str = "ATF22V10C";
+
+pub fn blank_design() -> Result<PhysicalDesign, DesignError>;
+pub fn encode_design(design: &PhysicalDesign, footprint: Footprint)
+    -> Result<FuseMap, DesignError>;
+pub fn decode_design(map: &FuseMap) -> Result<PhysicalDesign, DesignError>;
+
+pub enum DesignError {
+    Regions(RegionError),
+    Matrix(MatrixError),
+    Macrocell(MacrocellError),
+    Field(ConfigFieldError),
+    Encode(EncodeError),
+    Decode(DecodeError),
+    Footprint(FootprintError),
+    TermNotOwned { macrocell: MacrocellId, row: ProductTermId },
+    RowUsedTwice { macrocell: MacrocellId, row: ProductTermId },
+    NotAGlobalTerm { row: ProductTermId },
+    GlobalRowUsedTwice { row: ProductTermId },
+    NoSuchMacrocell { macrocell: MacrocellId },
+    MacrocellMissing { macrocell: MacrocellId },
+    MacrocellListedTwice { macrocell: MacrocellId },
+    FeedbackNotSupported { macrocell: MacrocellId, feedback: FeedbackSource },
+    WrongDevice { device: &'static str, expected: &'static str },
+}
+```
+
+`encode_design` takes the `Footprint` because the device has three (§4.7's fuse regions), and the design does not name one — a PAL-mode file and a power-down file describe the same array. `blank_design` does not, because the macrocells it returns are the same in all three.
+
+`blank_design`'s macrocells hold the values an **erased** part reads, so a blank design and an erased device agree about a macrocell nobody touched. That leaves the unused architecture pairs of an encoded design at combinational/active-high, which is *not* what WinCUPL writes — it leaves an undriven macrocell at combinational/active-low. The difference is inert, since a macrocell whose output-enable row is off is tri-stated at either polarity, and it is recorded in the tests rather than silently tolerated.
 
 Required invariants:
 
