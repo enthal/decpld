@@ -13,8 +13,8 @@
 
 use decpld_device::{
     AndMatrixSpec, FeedbackSource, FuseMap, FuseMutability, MacrocellId, MacrocellMode,
-    MacrocellSpec, OutputPolarity, PackageId, PackagePin, PackageSpec, PhysicalDesign,
-    PhysicalSignalSource, PinNumber, PlacedCube, ProductTermId, ProductTermRole,
+    MacrocellSpec, OutputPolarity, PackageId, PackageSpec, PhysicalDesign, PhysicalSignalSource,
+    PinNumber, PlacedCube, ProductTermId, ProductTermRole,
 };
 use decpld_logic::{BoolInputId, Cube, Polarity};
 use serde::Serialize;
@@ -38,6 +38,12 @@ pub enum ReportError {
 
     #[error("the design describes {macrocell}, which this device does not have")]
     UnknownMacrocell { macrocell: MacrocellId },
+
+    #[error(
+        "region `{name}` holds {bits} bits, which is not a whole number of bytes; \
+         a signature cannot be reported without dropping the remainder"
+    )]
+    SignatureNotWholeBytes { name: &'static str, bits: u32 },
 }
 
 /// Where a literal's value comes from.
@@ -83,6 +89,16 @@ pub struct EquationRef {
     /// blank line there would show an always-enabled output as having
     /// no enable at all, which is the opposite of what it means.
     pub text: String,
+    /// Whether the term holds some input at both polarities, and so can
+    /// never fire.
+    ///
+    /// `Cube::canonical` preserves a contradiction deliberately, and
+    /// such a term is as unsatisfiable as an absent one — but rendered
+    /// as bare text it reads exactly like a term that works. Flagged
+    /// rather than hidden: the two constantly-false spellings mean
+    /// different things (`a & !a` is a mistake, an absent enable is an
+    /// intent) and both need saying.
+    pub never_true: bool,
 }
 
 /// A device-wide term: reset or preset.
@@ -141,10 +157,29 @@ pub struct SourceReport {
 }
 
 impl SourceReport {
+    /// Whether the file actually claims a fuse checksum.
+    ///
+    /// `C0000` means "not computed" — JEDEC 3A grants the transmission
+    /// checksum that courtesy explicitly, and both GALasm and WinCUPL
+    /// emit it for the fuse checksum, which is why this project's
+    /// parser accepts it (`decpld-jedec`'s checksum check skips zero).
+    /// A file carrying it has made no claim to be wrong about.
+    #[must_use]
+    pub fn declares_a_checksum(&self) -> bool {
+        self.declared_fuse_checksum.is_some_and(|declared| declared != 0)
+    }
+
     /// Whether the file's own checksum claim is true.
+    ///
+    /// Silence and `C0000` both agree vacuously. Treating the latter as
+    /// a disagreement would accuse a valid file of corruption — and
+    /// since the parser turns every *other* mismatch into an error,
+    /// `C0000` is the only value that can reach a reader at all, so the
+    /// rule is not a corner case but the whole behaviour.
     #[must_use]
     pub fn fuse_checksum_agrees(&self) -> bool {
-        self.declared_fuse_checksum.is_none_or(|declared| declared == self.computed_fuse_checksum)
+        !self.declares_a_checksum()
+            || self.declared_fuse_checksum == Some(self.computed_fuse_checksum)
     }
 }
 
@@ -186,7 +221,7 @@ impl InspectReport {
             });
         }
 
-        let names = SignalNames::new(matrix, package);
+        let names = SignalNames::new(matrix, package, specs);
         let specs_by_id: BTreeMap<MacrocellId, &MacrocellSpec> =
             specs.iter().map(|spec| (spec.id, spec)).collect();
 
@@ -236,7 +271,7 @@ impl InspectReport {
             fuse_count: fuses.len(),
             macrocells,
             global_terms,
-            user_signature: read_signature(fuses),
+            user_signature: read_signature(fuses)?,
             security_fuse_set: fuses
                 .security_fuse()
                 .and_then(|fuse| fuses.get(fuse))
@@ -252,7 +287,7 @@ impl InspectReport {
         self
     }
 
-    /// Record a readback lock the device model cannot see.
+    /// Add a readback lock the device model cannot see.
     ///
     /// Not every device holds the security bit inside its fuse count —
     /// the ATF22V10C's is the JEDEC `G` field, and there is no fuse
@@ -260,9 +295,16 @@ impl InspectReport {
     /// outside the fuse vector it is recorded here, so a locked part is
     /// reported as locked rather than as clear because the region a
     /// generic reader looked for does not exist.
+    ///
+    /// **Additive, not an assignment.** A device that *does* keep the
+    /// bit inside `QF`, read from a file that says nothing about it,
+    /// would otherwise have a lock the fuses reported overwritten by
+    /// the file's silence — and a part reported readable when it is
+    /// locked is the one error that costs the user the chip. Evidence
+    /// of a lock from either source is evidence of a lock.
     #[must_use]
     pub fn with_security_fuse(mut self, set: bool) -> Self {
-        self.security_fuse_set = set;
+        self.security_fuse_set |= set;
         self
     }
 
@@ -283,17 +325,17 @@ struct SignalNames {
 }
 
 impl SignalNames {
-    fn new(matrix: &AndMatrixSpec, package: &PackageSpec) -> Self {
-        let pins_by_macrocell: BTreeMap<MacrocellId, PinNumber> = package
-            .pins()
-            .filter_map(|(pin, role)| match role {
-                PackagePin::Pad(pad) => Some((pad, pin)),
-                _ => None,
-            })
-            // A pad id and a macrocell id are the same number by
-            // construction in every model here; the device layer keeps
-            // them as separate types so a swap is a compile error.
-            .map(|(pad, pin)| (MacrocellId(pad.0), pin))
+    fn new(matrix: &AndMatrixSpec, package: &PackageSpec, specs: &[MacrocellSpec]) -> Self {
+        // Through `MacrocellSpec::pad`, never by casting one id to the
+        // other. `PadId` and `MacrocellId` are separate types because
+        // they are separate facts, and a crate that claims to describe
+        // a device it has never heard of cannot assume they agree —
+        // the two would then disagree *within one report*, which says
+        // a macrocell is on one pin and names its own feedback for
+        // another.
+        let pins_by_macrocell: BTreeMap<MacrocellId, PinNumber> = specs
+            .iter()
+            .filter_map(|spec| Some((spec.id, package.pin_of_pad(spec.pad?)?)))
             .collect();
 
         let by_input = matrix
@@ -333,13 +375,18 @@ impl SignalNames {
         if matrix.row(placed.row).is_none() {
             return Err(ReportError::UnknownRow { row: placed.row });
         }
-        let literals = self.literals(&placed.cube)?;
-        Ok(EquationRef { row: placed.row.0, text: equation_text(&literals), literals })
+        let cube = placed.cube.canonical();
+        let literals = self.literals(&cube)?;
+        Ok(EquationRef {
+            row: placed.row.0,
+            text: equation_text(&literals),
+            never_true: cube.contradiction().is_some(),
+            literals,
+        })
     }
 
     fn literals(&self, cube: &Cube) -> Result<Vec<LiteralRef>, ReportError> {
-        cube.canonical()
-            .literals
+        cube.literals
             .iter()
             .map(|literal| {
                 let signal = self
@@ -405,26 +452,43 @@ fn role_name(role: ProductTermRole) -> &'static str {
 
 /// Pack the user-signature region into bytes, most significant bit
 /// first, and read them as ASCII where they are printable.
-fn read_signature(fuses: &FuseMap) -> Option<SignatureReport> {
-    let region = fuses
+///
+/// Bit order is measured for the ATF22V10C (experiments `sig-partno-41`
+/// and `sig-partno-5A`) and assumed here for every device. That is a
+/// device fact in a device-agnostic crate and is recorded as such: the
+/// trigger to move it into [`decpld_device`] is the first target whose
+/// signature is not MSB-first.
+fn read_signature(fuses: &FuseMap) -> Result<Option<SignatureReport>, ReportError> {
+    let Some(region) = fuses
         .regions()
         .iter()
-        .find(|region| matches!(region.mutability, FuseMutability::UserSignature))?;
+        .find(|region| matches!(region.mutability, FuseMutability::UserSignature))
+    else {
+        return Ok(None);
+    };
 
     let bits: Vec<bool> =
         region.range.clone().filter_map(|fuse| fuses.get(decpld_device::FuseId(fuse))).collect();
+
+    // Refused rather than truncated. `chunks_exact` would drop a
+    // remainder silently — a twenty-bit region reporting two bytes and
+    // losing four — and a region shorter than a byte would produce no
+    // bytes at all, whereupon "every byte is printable" holds vacuously
+    // and the report prints an empty string for a region holding data.
+    let bits_len = u32::try_from(bits.len()).unwrap_or(u32::MAX);
+    if !bits.len().is_multiple_of(8) {
+        return Err(ReportError::SignatureNotWholeBytes { name: region.name, bits: bits_len });
+    }
 
     let bytes: Vec<u8> = bits
         .chunks_exact(8)
         .map(|chunk| chunk.iter().fold(0u8, |byte, bit| (byte << 1) | u8::from(*bit)))
         .collect();
 
-    let text = bytes
-        .iter()
-        .all(|byte| (0x20..=0x7E).contains(byte))
-        .then(|| bytes.iter().map(|byte| char::from(*byte)).collect::<String>());
+    let printable = !bytes.is_empty() && bytes.iter().all(|byte| (0x20..=0x7E).contains(byte));
+    let text = printable.then(|| bytes.iter().map(|byte| char::from(*byte)).collect::<String>());
 
-    Some(SignatureReport { bytes, text })
+    Ok(Some(SignatureReport { bytes, text }))
 }
 
 impl fmt::Display for InspectReport {
@@ -441,20 +505,28 @@ impl fmt::Display for InspectReport {
             writeln!(f, "  polarity  {}", cell.polarity)?;
             writeln!(f, "  feedback  {}", cell.feedback)?;
             match &cell.output_enable {
-                Some(enable) => writeln!(f, "  enable    {}", enable.text)?,
+                Some(enable) => {
+                    writeln!(f, "  enable    {}{}", enable.text, never_true_marker(enable))?;
+                }
                 None => writeln!(f, "  enable    never (pad not driven)")?,
             }
             writeln!(f, "  terms     {} of {}", cell.terms_used, cell.terms_available)?;
             for (index, term) in cell.sum.iter().enumerate() {
                 let joiner = if index == 0 { "  " } else { "| " };
-                writeln!(f, "    {joiner}{}", term.text)?;
+                writeln!(f, "    {joiner}{}{}", term.text, never_true_marker(term))?;
             }
         }
 
         if !self.global_terms.is_empty() {
             writeln!(f, "\ndevice-wide terms")?;
             for term in &self.global_terms {
-                writeln!(f, "  {:<20}{}", term.role, term.equation.text)?;
+                writeln!(
+                    f,
+                    "  {:<20}{}{}",
+                    term.role,
+                    term.equation.text,
+                    never_true_marker(&term.equation)
+                )?;
             }
         }
 
@@ -475,26 +547,34 @@ impl fmt::Display for InspectReport {
         if let Some(source) = &self.source {
             writeln!(f, "\nfile")?;
             if !source.design_specification.trim().is_empty() {
-                writeln!(f, "  header    {}", source.design_specification.trim())?;
+                field(f, "header", &source.design_specification)?;
             }
-            match source.declared_fuse_checksum {
-                // A `C` field disagreeing with the fuse data it claims
-                // to describe is the whole reason the declared and
-                // computed values are reported separately.
-                Some(declared) if !source.fuse_checksum_agrees() => writeln!(
+            if source.fuse_checksum_agrees() {
+                match source.declared_fuse_checksum {
+                    // `C0000` is JEDEC's "not computed", not a claim
+                    // that happens to be false — the parser accepts it
+                    // for that reason, and calling it a disagreement
+                    // would accuse a valid file of corruption.
+                    Some(0) | None => writeln!(
+                        f,
+                        "  checksum  none declared, {:04X} computed",
+                        source.computed_fuse_checksum
+                    )?,
+                    Some(declared) => writeln!(f, "  checksum  {declared:04X}")?,
+                }
+            } else {
+                writeln!(
                     f,
-                    "  checksum  {declared:04X} declared, {:04X} computed — DISAGREE",
+                    "  checksum  {:04X} declared, {:04X} computed — DISAGREE",
+                    source.declared_fuse_checksum.unwrap_or_default(),
                     source.computed_fuse_checksum
-                )?,
-                Some(declared) => writeln!(f, "  checksum  {declared:04X}")?,
-                None => writeln!(
-                    f,
-                    "  checksum  none declared, {:04X} computed",
-                    source.computed_fuse_checksum
-                )?,
+                )?;
+            }
+            if let Some(transmission) = source.transmission_checksum {
+                writeln!(f, "  transmit  {transmission:04X}")?;
             }
             for note in &source.notes {
-                writeln!(f, "  note      {note}")?;
+                field(f, "note", note)?;
             }
             if !source.unmodelled_fields.is_empty() {
                 writeln!(f, "  retained  {}", source.unmodelled_fields.join(" "))?;
@@ -502,4 +582,27 @@ impl fmt::Display for InspectReport {
         }
         Ok(())
     }
+}
+
+/// What follows a term that can never fire.
+fn never_true_marker(equation: &EquationRef) -> &'static str {
+    if equation.never_true { "   (never true)" } else { "" }
+}
+
+/// A labelled field whose value may run to several lines.
+///
+/// WinCUPL's header is always five or six — compiler banner, device,
+/// library, date, name, part number — so printing it raw drops
+/// unindented lines into the middle of an indented block. That is the
+/// most common real input this report will ever see, not a corner case.
+fn field(f: &mut fmt::Formatter<'_>, label: &str, value: &str) -> fmt::Result {
+    const WIDTH: usize = 10;
+    for (index, line) in value.trim_end().lines().enumerate() {
+        if index == 0 {
+            writeln!(f, "  {label:<WIDTH$}{}", line.trim())?;
+        } else {
+            writeln!(f, "  {:WIDTH$}{}", "", line.trim())?;
+        }
+    }
+    Ok(())
 }

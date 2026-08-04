@@ -2230,6 +2230,8 @@ pub struct InspectReport {
     pub global_terms: Vec<GlobalTermReport>,
     pub user_signature: Option<SignatureReport>,
     pub security_fuse_set: bool,
+    /// Present when the design came from a file rather than an encoder.
+    pub source: Option<SourceReport>,
 }
 
 impl InspectReport {
@@ -2241,7 +2243,26 @@ impl InspectReport {
         fuses: &FuseMap,
     ) -> Result<Self, ReportError>;
 
+    pub fn with_source(self, source: SourceReport) -> Self;
+    /// Additive: ORs in a lock the fuse vector cannot carry.
+    pub fn with_security_fuse(self, set: bool) -> Self;
+
     pub fn to_json(&self) -> Result<String, serde_json::Error>;
+}
+
+/// What the *file* said, as distinct from what the device holds.
+pub struct SourceReport {
+    pub design_specification: String,
+    pub declared_fuse_checksum: Option<u16>,
+    pub computed_fuse_checksum: u16,
+    pub transmission_checksum: Option<u16>,
+    pub notes: Vec<String>,
+    pub unmodelled_fields: Vec<String>,
+}
+
+impl SourceReport {
+    pub fn declares_a_checksum(&self) -> bool;
+    pub fn fuse_checksum_agrees(&self) -> bool;
 }
 
 pub enum ReportError {
@@ -2249,8 +2270,21 @@ pub enum ReportError {
     UnknownRow { row: ProductTermId },
     UnknownInput { input: BoolInputId },
     UnknownMacrocell { macrocell: MacrocellId },
+    SignatureNotWholeBytes { name: &'static str, bits: u32 },
 }
 ```
+
+**`C0000` is "not computed", not a wrong answer.** JEDEC 3A grants the transmission checksum that courtesy explicitly, GALasm and WinCUPL both emit it for the fuse checksum, and §6.2's parser accepts it for that reason. Since the parser turns every *other* mismatch into an error, zero is the only declared value a reader can ever see disagreeing with the data — so a report that called it a disagreement would make every such finding a false alarm on a valid file. `declares_a_checksum` is the predicate that says so.
+
+**`with_security_fuse` is additive.** Not every device keeps the security bit inside `QF` — the ATF22V10C's is the JEDEC `G` field, with no fuse index to cite (§4.7) — so the state sometimes arrives from outside the vector. Assigning it would let a file's *silence* clear a lock the fuses reported, and a part reported readable when it is locked is the one error that costs a user the chip.
+
+**A signature region that is not a whole number of bytes is refused.** Packing would otherwise drop the remainder silently, and a region shorter than a byte produces no bytes at all — whereupon "every byte is printable" holds vacuously and the report prints an empty string for a region holding data. Bit order is MSB-first, which is *measured for the ATF22V10C* and assumed for every device; the trigger to move it into the device layer is the first target where it does not hold.
+
+**A term that can never fire is flagged, not hidden.** `Cube::canonical` preserves a contradiction deliberately (§3.9), and such a term is as unsatisfiable as an absent one — but rendered as bare text it reads exactly like a term that works. `EquationRef::never_true` says so, because the two constantly-false spellings mean different things: `a & !a` is a mistake worth reporting, an absent enable is an intent worth encoding.
+
+**Literal order within a term is the array's column order**, not pin order. It is deterministic (§13.2), which is what matters, and it is the order the silicon is in.
+
+A macrocell's pin is resolved through `MacrocellSpec::pad` and `PackageSpec::pin_of_pad`, never by casting a `MacrocellId` to a `PadId`. They are separate types because they are separate facts, and a crate that reports a device it has never heard of cannot assume they agree — the two would then disagree *within one report*, which would say a macrocell is on one pin and name its own feedback for another.
 
 **Everything is named in pins.** A `PhysicalDesign` speaks in macrocell ids, product-term rows, and `BoolInputId`s; a person holding the part has only pin numbers, so that is the translation the report exists to perform. A feedback path is named for the pin its macrocell drives — it does arrive there — with the difference recorded as a `kind` rather than spelled into the name. A literal no `LiteralSource` carries is an **error**, not a fallback to "input 9": a signal name corresponding to nothing on the part is worse than a refusal. A design whose `package` is not the one supplied is refused for the same reason, since every pin number in the report would then be confidently wrong.
 
@@ -2636,7 +2670,9 @@ decpld oracle analyze-suite targets/fixtures/atf22v10
 
 `--package` is a **checked assertion**, never an override (§8.1). Relabelling the report to whatever was asked for would turn the flag into a way of printing pin numbers for a package the file is not for.
 
-`jed inspect` has no finding path. The parser already refuses a file whose `C` field disagrees with its fuse data, so every file it can describe has had its checksum checked; a second check in the command could not fire and would imply a gate that is not its.
+`jed inspect` has no finding path. The parser refuses a file whose `C` field disagrees with its fuse data and accepts `C0000` as JEDEC's "not computed", so every file that reaches a report either states a true checksum or states none. A check in the command could fire only on the second case, where there is nothing to report.
+
+The code joining §6.2's parser, §4.7's device model, and §6.3's report lives in the CLI crate, above all three, because none of them may depend on the others. That placement is a **deferral, not a conclusion**: `Device` is the beginning of §8.1's target registry, and the LSP and `decpld report` will need the same seam. It moves to a library crate at the first of ATF16V8 support or a second consumer, whichever comes first.
 
 ### 8.2.1 Exit codes
 

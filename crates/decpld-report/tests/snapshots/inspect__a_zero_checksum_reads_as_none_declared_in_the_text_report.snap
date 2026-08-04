@@ -28,7 +28,7 @@ security   clear
 
 file
   header    a two-macrocell part
-  checksum  1235 declared, 1234 computed — DISAGREE
+  checksum  none declared, 1234 computed
   transmit  ABCD
   note      written by hand
   retained  QP J

@@ -312,10 +312,11 @@ fn inspect_command(
         print!("{report}");
     }
 
-    // No `FINDINGS` path. The parser already refuses a file whose `C`
-    // field disagrees with its fuse data (E3021), so a report only ever
-    // exists for a file whose checksum is true; a second check here
-    // could not fire and would imply a gate that is not this command's.
+    // No `FINDINGS` path. The parser refuses a file whose `C` field
+    // disagrees with its fuse data (E3021) and accepts `C0000` as
+    // JEDEC's "not computed", so every file that reaches a report
+    // either states a true checksum or states none. A check here could
+    // only fire on the second case, where there is nothing to report.
     Ok(OK)
 }
 

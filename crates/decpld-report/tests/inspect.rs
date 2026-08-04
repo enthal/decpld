@@ -366,7 +366,10 @@ fn a_checksum_a_file_declared_is_reported_beside_the_one_its_data_produces() {
     let mut source = source_report();
     assert!(source.fuse_checksum_agrees());
 
-    source.declared_fuse_checksum = Some(0x0000);
+    // A non-zero value that is not the computed one. Zero would NOT do
+    // here: JEDEC gives it the meaning "not computed", so it is the one
+    // wrong-looking value that is not a wrong claim.
+    source.declared_fuse_checksum = Some(0x1235);
     assert!(!source.fuse_checksum_agrees());
 
     // A file that declared none makes no claim to be wrong about.
@@ -392,6 +395,205 @@ fn the_text_report_shows_what_the_file_claimed() {
 #[test]
 fn a_disagreeing_checksum_is_called_out_in_the_text_report() {
     let mut source = source_report();
+    source.declared_fuse_checksum = Some(0x1235);
+    insta::assert_snapshot!(report().with_source(source).to_string());
+}
+
+#[test]
+fn a_zero_checksum_reads_as_none_declared_in_the_text_report() {
+    let mut source = source_report();
     source.declared_fuse_checksum = Some(0x0000);
     insta::assert_snapshot!(report().with_source(source).to_string());
+}
+
+#[test]
+fn a_zero_checksum_is_not_computed_rather_than_wrong() {
+    // JEDEC 3A grants `C0000` the meaning "not computed", and this
+    // project's own parser accepts it for exactly that reason — both
+    // GALasm and WinCUPL emit it. Treating it as a disagreement accuses
+    // a valid file of corruption.
+    //
+    // It is also the ONLY value that can reach a disagreement through
+    // the CLI: the parser turns any other mismatch into an error, so
+    // without this rule every "DISAGREE" the command ever printed would
+    // be a false alarm.
+    let mut source = source_report();
+    source.declared_fuse_checksum = Some(0x0000);
+    source.computed_fuse_checksum = 0xDD2F;
+    assert!(source.fuse_checksum_agrees(), "C0000 makes no claim to be wrong about");
+    assert!(!source.declares_a_checksum());
+
+    source.declared_fuse_checksum = Some(0xDD2E);
+    assert!(!source.fuse_checksum_agrees(), "a non-zero wrong checksum is a disagreement");
+    assert!(source.declares_a_checksum());
+}
+
+#[test]
+fn a_signature_holding_a_space_is_still_printable() {
+    // 0x20 is inside JEDEC's own field-character class and is what a
+    // short `PartNo` is padded with, so a signature reading "Hi      "
+    // must render as text. An off-by-one at the bottom of the printable
+    // range would silently hide the common case.
+    let mut map = FuseMap::erased(regions());
+    // 'H' = 0x48, ' ' = 0x20.
+    for (index, bit) in [0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0].into_iter().enumerate() {
+        let fuse = decpld_device::FuseId(ARRAY + u32::try_from(index).expect("sixteen fits"));
+        map.set(fuse, bit == 1).expect("a signature fuse");
+    }
+    let report =
+        InspectReport::new(&design(), &package(), &matrix(), &specs(), &map).expect("describable");
+    let signature = report.user_signature.expect("a signature region");
+    assert_eq!(signature.bytes, vec![0x48, 0x20]);
+    assert_eq!(signature.text.as_deref(), Some("H "));
+}
+
+#[test]
+fn a_signature_region_that_is_not_whole_bytes_is_refused() {
+    // Packing would otherwise drop the remainder silently: a 20-bit
+    // region would report two bytes and lose four bits, and a region
+    // shorter than a byte would report NO bytes — whereupon "every byte
+    // is printable" is vacuously true and the report prints an empty
+    // string for a region that holds data.
+    let regions = FuseRegions::new(
+        ARRAY + 20,
+        vec![
+            FuseRegion {
+                name: "array",
+                range: 0..ARRAY,
+                erased_value: true,
+                mutability: FuseMutability::Programmable,
+            },
+            FuseRegion {
+                name: "user-signature",
+                range: ARRAY..ARRAY + 20,
+                erased_value: true,
+                mutability: FuseMutability::UserSignature,
+            },
+        ],
+    )
+    .expect("a valid layout");
+    let map = FuseMap::erased(regions);
+    assert_eq!(
+        InspectReport::new(&design(), &package(), &matrix(), &specs(), &map)
+            .expect_err("twenty bits is not a whole number of bytes"),
+        ReportError::SignatureNotWholeBytes { name: "user-signature", bits: 20 }
+    );
+}
+
+#[test]
+fn a_macrocell_whose_pad_is_not_its_own_number_is_still_named_correctly() {
+    // `PadId` and `MacrocellId` are separate types because they are
+    // separate facts: `MacrocellSpec::pad` is what connects them, and
+    // deriving a pin by casting one id to the other is a device
+    // assumption living in a device-agnostic crate.
+    //
+    // Concretely, with the two pads swapped: macrocell 0 drives pin 4,
+    // so a literal fed back from macrocell 0 must read `pin4`. Casting
+    // the raw number instead names it `pin3` — and the very same report
+    // says three lines earlier that macrocell 0 is on pin 4.
+    let mut specs = specs();
+    specs[0].pad = Some(PadId(1));
+    specs[1].pad = Some(PadId(0));
+
+    let report =
+        InspectReport::new(&design(), &package(), &matrix(), &specs, &FuseMap::erased(regions()))
+            .expect("describable");
+
+    assert_eq!(report.macrocells[0].pin, Some(4), "macrocell 0 now drives pin 4");
+    assert_eq!(report.macrocells[1].pin, Some(3));
+    // The device-wide term names macrocell 0's feedback, which now
+    // arrives on pin 4.
+    assert_eq!(report.global_terms[0].equation.text, "!pin1 & pin4");
+    // And macrocell 0's own second term names macrocell 1's feedback.
+    assert_eq!(report.macrocells[0].sum[1].text, "pin3");
+}
+
+#[test]
+fn a_lock_reported_by_the_device_is_not_cleared_by_a_file_that_is_silent() {
+    // `with_security_fuse` supplies a state the fuse vector cannot
+    // carry; it must not overwrite one the vector *can*. A device whose
+    // security bit is inside `QF`, read from a file with no `G` field,
+    // would otherwise be reported as readable — the one error that
+    // costs the user the chip.
+    let mut map = FuseMap::erased(regions());
+    map.set_security_fuse(true).expect("this device has one");
+    let report =
+        InspectReport::new(&design(), &package(), &matrix(), &specs(), &map).expect("describable");
+    assert!(report.security_fuse_set);
+    assert!(report.with_security_fuse(false).security_fuse_set, "silence does not unlock");
+
+    // And the other direction still works: a device with no security
+    // region takes the state entirely from outside.
+    let report = report_of(&FuseMap::erased(regions()));
+    assert!(!report.security_fuse_set);
+    assert!(report_of(&FuseMap::erased(regions())).with_security_fuse(true).security_fuse_set);
+}
+
+fn report_of(map: &FuseMap) -> InspectReport {
+    InspectReport::new(&design(), &package(), &matrix(), &specs(), map).expect("describable")
+}
+
+#[test]
+fn a_contradictory_term_is_marked_never_true_rather_than_read_as_logic() {
+    // `Cube::canonical` deliberately preserves a contradiction, and a
+    // term holding an input at both polarities is constantly false —
+    // just as unsatisfiable as an absent one. Rendered as bare text it
+    // is indistinguishable from a term that fires, which is precisely
+    // the confusion between the two empty states this report exists to
+    // prevent.
+    let mut design = design();
+    design.macrocells[0].data_terms[0].cube = Cube::new([t(IN1), c(IN1)]);
+    let report =
+        InspectReport::new(&design, &package(), &matrix(), &specs(), &FuseMap::erased(regions()))
+            .expect("describable");
+    let term = &report.macrocells[0].sum[0];
+    assert!(term.never_true, "a & !a can never fire");
+    assert_eq!(term.text, "pin1 & !pin1");
+    // A satisfiable term is not marked.
+    assert!(!report.macrocells[0].sum[1].never_true);
+    // Nor is the empty AND, which is the opposite state entirely.
+    assert!(!report.macrocells[0].output_enable.as_ref().expect("always").never_true);
+}
+
+#[test]
+fn a_cube_built_out_of_order_renders_the_same_as_one_built_in_order() {
+    // The report canonicalises rather than trusting its input's order.
+    // Everything reaching it today comes from `decode_row`, which
+    // already does — but a fitter's own pre-encode design will not, and
+    // determinism (SPEC.md §13.2) is not something to discover later.
+    let ordered = {
+        let mut d = design();
+        d.macrocells[0].data_terms[0].cube = Cube::new([t(IN1), c(IN2), t(FB1)]);
+        InspectReport::new(&d, &package(), &matrix(), &specs(), &FuseMap::erased(regions()))
+            .expect("ok")
+    };
+    let shuffled = {
+        let mut d = design();
+        d.macrocells[0].data_terms[0].cube = Cube::new([t(FB1), t(IN1), c(IN2), t(IN1)]);
+        InspectReport::new(&d, &package(), &matrix(), &specs(), &FuseMap::erased(regions()))
+            .expect("ok")
+    };
+    assert_eq!(ordered.macrocells[0].sum[0], shuffled.macrocells[0].sum[0]);
+    assert_eq!(ordered.macrocells[0].sum[0].text, "pin1 & !pin2 & pin4");
+}
+
+#[test]
+fn a_multi_line_header_does_not_break_the_two_column_layout() {
+    // WinCUPL's header is always several lines — compiler banner,
+    // device, library, date, name, part number. Printing it raw puts
+    // five unindented lines in the middle of an indented block, which
+    // is the single most common real input this report will ever see.
+    let mut source = source_report();
+    source.design_specification =
+        "CUPL(WM) 5.0a\nDevice g22v10 Library DLIB-h-40-1\nName counter\n".to_owned();
+    source.notes = vec!["note line one\nsecond line".to_owned()];
+    insta::assert_snapshot!(report().with_source(source).to_string());
+}
+
+#[test]
+fn the_text_report_shows_the_transmission_checksum() {
+    // SPEC.md §6.3 asks for checksums, plural. The transmission
+    // checksum reached JSON and not the text report.
+    let text = report().with_source(source_report()).to_string();
+    assert!(text.contains("ABCD"), "{text}");
 }

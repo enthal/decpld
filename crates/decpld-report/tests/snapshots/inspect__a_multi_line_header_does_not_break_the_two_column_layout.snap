@@ -27,8 +27,11 @@ signature  ff ff (not printable)
 security   clear
 
 file
-  header    a two-macrocell part
-  checksum  1235 declared, 1234 computed — DISAGREE
+  header    CUPL(WM) 5.0a
+            Device g22v10 Library DLIB-h-40-1
+            Name counter
+  checksum  1234
   transmit  ABCD
-  note      written by hand
+  note      note line one
+            second line
   retained  QP J

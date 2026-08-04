@@ -1,20 +1,29 @@
 //! Turning a parsed JEDEC file into an inspection report. SPEC.md §6.3.
 //!
-//! This is the seam where three layers meet, and it lives here rather
-//! than in any of them: `decpld-jedec` transfers numbered fuse states
-//! and must not know what a macrocell is, `decpld-atf22v10` describes a
-//! device and must not know JEDEC syntax, and `decpld-report` renders a
-//! design and must not know either. Somebody has to join them, and the
-//! joint belongs above all three.
+//! This is the seam where three layers meet, and it lives above all of
+//! them: `decpld-jedec` transfers numbered fuse states and must not know
+//! what a macrocell is, `decpld-atf22v10` describes a device and must
+//! not know JEDEC syntax, and `decpld-report` renders a design and must
+//! not know either. Somebody has to join them, and none of them may.
+//!
+//! **That it lives in the CLI crate is a deferral, not a conclusion.**
+//! `Device` is the beginning of SPEC.md §8.1's target registry, and
+//! CLAUDE.md's rule that the CLI and LSP share everything means this
+//! cannot stay reachable only from a binary. It moves to a library
+//! crate at the first of ATF16V8 support or a second consumer —
+//! `decpld report`, or the language server — whichever comes first.
+//! With one device and one command, a crate boundary today would be
+//! guessing at an interface nothing yet uses.
 //!
 //! Everything here is a pure function of a parsed file, so it is tested
 //! without spawning a process (CLAUDE.md: logic testable outside the CLI
 //! must not live inside a CLI function).
 
 use decpld_atf22v10::{
-    DesignError, Footprint, FootprintError, and_matrix, decode_design, dip24, macrocells,
+    DesignError, Footprint, FootprintError, MacrocellError, and_matrix, decode_design, dip24,
+    macrocells, regions_for,
 };
-use decpld_device::{FuseMap, FuseStatesError, PackageSpec};
+use decpld_device::{FuseMap, FuseStatesError, MatrixError, PackageSpec, RegionError};
 use decpld_jedec::JedecFile;
 use decpld_report::{InspectReport, ReportError, SourceReport};
 
@@ -49,7 +58,11 @@ pub enum InspectError {
     #[error("{0}")]
     Report(#[from] ReportError),
     #[error("{0}")]
-    Device(String),
+    Regions(#[from] RegionError),
+    #[error("{0}")]
+    Matrix(#[from] MatrixError),
+    #[error("{0}")]
+    Macrocell(#[from] MacrocellError),
     #[error(
         "the file describes a {package_in_file} part and --package {requested} was asserted; \
          the assertion is checked, never applied"
@@ -81,8 +94,7 @@ pub fn inspect(
     // count it does not have, which is what turns "this is an ATF16V8
     // file" from a confusing half-decode into one sentence.
     let footprint = Footprint::from_fuse_count(file.fuses.len())?;
-    let regions =
-        decpld_atf22v10::regions_for(footprint).map_err(|e| InspectError::Device(e.to_string()))?;
+    let regions = regions_for(footprint)?;
 
     let map = FuseMap::from_states(regions, file.fuses.iter())?;
     let design = decode_design(&map)?;
@@ -97,8 +109,8 @@ pub fn inspect(
         });
     }
 
-    let matrix = and_matrix().map_err(|e| InspectError::Device(e.to_string()))?;
-    let specs = macrocells().map_err(|e| InspectError::Device(e.to_string()))?;
+    let matrix = and_matrix()?;
+    let specs = macrocells()?;
 
     let report = InspectReport::new(&design, &package_spec, &matrix, &specs, &map)?
         .with_source(source_report(file))
@@ -285,11 +297,64 @@ mod tests {
         let source = inspect(&file, Device::Atf22v10c, None).expect("describable").source;
         assert!(source.as_ref().expect("a file section").fuse_checksum_agrees());
 
-        file.fuse_checksum = Some(computed.wrapping_add(1));
+        // Not zero: JEDEC gives `C0000` the meaning "not computed", so
+        // it is the one wrong-looking value that makes no claim.
+        file.fuse_checksum = Some(if computed == u16::MAX { 1 } else { computed + 1 });
         let source = inspect(&file, Device::Atf22v10c, None).expect("describable").source;
         let source = source.expect("a file section");
         assert!(!source.fuse_checksum_agrees());
         assert_eq!(source.computed_fuse_checksum, computed);
+    }
+
+    #[test]
+    fn the_file_section_carries_what_the_file_actually_said() {
+        // `source_report` was extracted so it could be tested without
+        // spawning a process; a pure function nobody tests is the same
+        // omission the extraction was meant to avoid. Every field, so
+        // that dropping any one of them is visible.
+        let mut file = probe_file();
+        file.design_specification = "a header\n".to_owned();
+        file.notes = vec!["first note".to_owned(), "second note".to_owned()];
+        file.fuse_checksum = Some(0x1234);
+        file.transmission_checksum = Some(0xABCD);
+        file.unknown_fields = vec![decpld_jedec::JedecField {
+            identifier: "QP".to_owned(),
+            body: "24".to_owned(),
+            span: decpld_diagnostics::Span::new(
+                decpld_diagnostics::FileId(0),
+                decpld_diagnostics::TextRange::new(0, 0),
+            ),
+        }];
+
+        let source = inspect(&file, Device::Atf22v10c, None)
+            .expect("describable")
+            .source
+            .expect("a file section");
+        assert_eq!(source.design_specification, "a header\n");
+        assert_eq!(source.notes, ["first note", "second note"]);
+        assert_eq!(source.declared_fuse_checksum, Some(0x1234));
+        assert_eq!(source.transmission_checksum, Some(0xABCD));
+        assert_eq!(source.unmodelled_fields, ["QP"]);
+        assert_eq!(source.computed_fuse_checksum, file.computed_fuse_checksum());
+    }
+
+    #[test]
+    fn a_zero_checksum_is_read_as_no_claim_rather_than_as_a_wrong_one() {
+        // `C0000` is JEDEC's "not computed" and this project's parser
+        // accepts it for that reason — both GALasm and WinCUPL emit it.
+        // Since the parser turns every OTHER mismatch into an error,
+        // zero is the only value a reader can ever see disagreeing with
+        // the data, so calling it a disagreement would make every such
+        // report a false alarm on a valid file.
+        let mut file = probe_file();
+        file.fuse_checksum = Some(0);
+        let source = inspect(&file, Device::Atf22v10c, None)
+            .expect("describable")
+            .source
+            .expect("a file section");
+        assert!(source.fuse_checksum_agrees(), "C0000 makes no claim");
+        assert!(!source.declares_a_checksum());
+        assert_ne!(source.computed_fuse_checksum, 0, "the data does have a checksum");
     }
 
     #[test]
@@ -298,7 +363,7 @@ mod tests {
         // intuition that "erased" means "inert". Every link is blown, so
         // every term is the empty AND and every output-enable row is
         // permanently asserted.
-        let regions = decpld_atf22v10::regions_for(Footprint::Gal).expect("valid");
+        let regions = regions_for(Footprint::Gal).expect("valid");
         let file = file_of(&FuseMap::erased(regions));
         let report = inspect(&file, Device::Atf22v10c, None).expect("describable");
         assert_eq!(report.macrocells.len(), 10);

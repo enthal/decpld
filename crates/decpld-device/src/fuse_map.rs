@@ -155,7 +155,13 @@ impl FuseMap {
                 continue;
             };
             for fuse in region.range.clone() {
-                let found = bits.get(fuse as usize).copied().unwrap_or(required);
+                // Indexed through `get`, but a miss is a REFUSAL rather
+                // than a pass. The length check above plus
+                // `FuseRegions`' own `PastEnd` rule make it
+                // unreachable; defaulting to "compliant" would fail
+                // open if it ever became reachable, which is the wrong
+                // end of "prefer a rejected build to a wrong one".
+                let found = bits.get(fuse as usize).copied().unwrap_or(!required);
                 if found != required {
                     return Err(FuseStatesError::Reserved {
                         fuse: FuseId(fuse),

@@ -29,5 +29,6 @@ security   clear
 file
   header    a two-macrocell part
   checksum  1234
+  transmit  ABCD
   note      written by hand
   retained  QP J
