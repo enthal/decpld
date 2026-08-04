@@ -169,7 +169,7 @@ Install the pre-commit hook once — it symlinks into the shared hooks dir, so a
 scripts/install-git-hooks.sh
 ```
 
-The hook runs `fmt` + `clippy` + the markdown lint. It deliberately does **not** run the test suite: the project commits failing tests *before* the code that makes them pass, so the test gate belongs in CI, which runs the full suite on a macOS + Linux matrix and gates merge.
+The hook runs `fmt` + `clippy` + the markdown lint. It deliberately does **not** run the test suite: the project commits failing tests *before* the code that makes them pass, so the test gate belongs in CI, which runs the full suite on Linux and gates merge.
 
 `main` is protected: pull requests only, linear history, required status checks, and **signed commits**. All work lands on a `<kind>/<slug>` branch and is squash-merged. [CLAUDE.md](CLAUDE.md) documents the full working protocol — it is written for AI coding agents but describes the project's actual engineering rules, so it is worth reading either way.
 

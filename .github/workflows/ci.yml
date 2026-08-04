@@ -40,13 +40,15 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  # Linux only. deCPLD is a pure data transformation — text in, fuse
+  # vector out — with no platform-specific code, no FFI, and no OS
+  # interaction beyond reading and writing files. There is nothing a
+  # macOS runner would catch that a Linux runner would not, and macOS
+  # minutes cost several times more. Add a second OS back only if
+  # genuinely `cfg`-gated code ever appears.
   clippy:
-    name: clippy (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    name: clippy
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
@@ -57,12 +59,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
-    name: test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    name: test
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
