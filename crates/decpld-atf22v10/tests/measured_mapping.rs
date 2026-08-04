@@ -265,3 +265,36 @@ fn an_erased_device_has_every_array_link_blown() {
         assert_eq!(map.get(FuseId(fuse)), Some(true), "fuse {fuse}");
     }
 }
+
+#[test]
+fn feedback_complements_are_adjacent_too() {
+    // The evidence document measures nfb22/nfb18/nfb14 precisely because
+    // establishing the complement relation on inputs and generalising to
+    // feedback is an assumption rather than a measurement. Asserting it
+    // only for inputs would leave the model's stronger claim untested.
+    for pin in [22, 18, 14] {
+        let macrocell = G.macrocell_of_pin(PinNumber(pin)).expect("an I/O pin");
+        let source = G
+            .sources()
+            .find(|s| s.kind == SourceKind::Feedback(macrocell))
+            .expect("a feedback source");
+        assert_eq!(source.complement_column(), source.true_column() + 1, "pin {pin}");
+    }
+}
+
+#[test]
+fn out_of_range_lookups_return_none_rather_than_panicking() {
+    // Index arithmetic is this crate's named hazard, and these are the
+    // paths a fitter will reach with a computed index.
+    for index in 22..=255u8 {
+        assert!(G.source(index).is_none(), "source {index}");
+    }
+    for pin in [0u8, 12, 13, 24, 255] {
+        assert!(G.macrocell_of_pin(PinNumber(pin)).is_none(), "pin {pin} is not an I/O pin");
+    }
+    for index in [Atf22v10Geometry::MACROCELLS, 200, 255] {
+        assert!(G.row_block(MacrocellIndex(index)).is_none(), "macrocell {index}");
+        assert!(G.architecture_pair(MacrocellIndex(index)).is_none(), "macrocell {index}");
+        assert!(G.macrocell_pin(MacrocellIndex(index)).is_none(), "macrocell {index}");
+    }
+}

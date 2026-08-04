@@ -20,7 +20,22 @@ pub const ROWS: u32 = 132;
 /// column observed is 43 (`nc13`, the complement of pin 13).
 pub const COLUMNS: u32 = 44;
 
+/// The array's two dimensions and its fuse count are cited separately —
+/// rows and columns from Galette and GALasm, the count from the
+/// footprint arithmetic — so nothing but this assertion stops them
+/// drifting apart. A mismatch would surface as a `FuseRegions` gap at
+/// runtime; here it is a compile error.
+const _: () = assert!(ROWS * COLUMNS == crate::regions::ARRAY_FUSES);
+
 /// A DIP-24 pin number.
+///
+/// PROVISIONAL. SPEC.md §4.6 makes `PinNumber` a device-layer type — the
+/// key of `PackageSpec.pins` — and CLAUDE.md lists it among the
+/// project-wide newtypes. It lives here only until `decpld-device` grows
+/// the package model, at which point this moves and this crate imports
+/// it. Same for [`MacrocellIndex`], which SPEC calls `MacrocellId`, and
+/// for the bare `u32` columns, which SPEC.md §4.4 types as
+/// `MatrixColumn`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PinNumber(pub u8);
 
@@ -109,9 +124,8 @@ impl Atf22v10Geometry {
 
     /// The pin a macrocell drives.
     ///
-    /// Evidence: measured at five points spanning the range — pins 23,
-    /// 22, 20, 17, 14 (`arch-comb-high`, `fb22`, `mc20`, `mc17`,
-    /// `mc14`).
+    /// Evidence: measured for every macrocell, one design each
+    /// (`mc14` … `mc23`).
     #[must_use]
     pub fn macrocell_pin(self, macrocell: MacrocellIndex) -> Option<PinNumber> {
         (macrocell.0 < Self::MACROCELLS).then(|| PinNumber(14 + macrocell.0))
@@ -156,9 +170,10 @@ impl Atf22v10Geometry {
     /// data rows.
     ///
     /// Evidence: **all ten measured**, one design per macrocell
-    /// (`mc14`…`mc23`, with pins 22 and 23 additionally covered by
-    /// `fb22` and `arch-comb-high`). The first row of each block is
-    /// where that design's OE term appears.
+    /// (`mc14` … `mc23`). The first row of each block is where that
+    /// design's OE term appears. Pins 22 and 23 are additionally
+    /// corroborated by `fb22` and `arch-comb-high`, which read the same
+    /// values out of two-output designs.
     ///
     /// The measured table is identical to Galette's `OLMC_ROWS_22V10`,
     /// which is a cross-check rather than the source: an earlier version
@@ -179,20 +194,33 @@ impl Atf22v10Geometry {
     /// not assumed.
     #[must_use]
     pub fn row_block(self, macrocell: MacrocellIndex) -> Option<RowBlock> {
+        // One table rather than two parallel ones: the sizes are not
+        // independent data — block *i* ends where block *i−1* begins —
+        // and two arrays could disagree about their own length while
+        // only the second was indexed unchecked.
+        //
         // Indexed by macrocell index, i.e. by pin ascending from 14.
-        const FIRST_ROW: [u32; 10] = [122, 111, 98, 83, 66, 49, 34, 21, 10, 1];
-        const SIZE: [u32; 10] = [9, 11, 13, 15, 17, 17, 15, 13, 11, 9];
+        const BLOCKS: [(u32, u32); 10] = [
+            (122, 9),
+            (111, 11),
+            (98, 13),
+            (83, 15),
+            (66, 17),
+            (49, 17),
+            (34, 15),
+            (21, 13),
+            (10, 11),
+            (1, 9),
+        ];
 
-        let index = usize::from(macrocell.0);
-        let first = *FIRST_ROW.get(index)?;
-        let size = SIZE[index];
+        let &(first, size) = BLOCKS.get(usize::from(macrocell.0))?;
         Some(RowBlock { output_enable_row: first, data_rows: (first + 1)..(first + size) })
     }
 
     /// The two architecture fuses of a macrocell: S0 then S1.
     ///
     /// Evidence: pair index descends from pin 23, measured for **all
-    /// ten** macrocells (`mc14`…`mc23`) — the same designs that fix the
+    /// ten** macrocells (`mc14` … `mc23`) — the same designs that fix the
     /// row blocks, which is how the reversal between the two orderings
     /// is established at every point rather than at its ends.
     #[must_use]

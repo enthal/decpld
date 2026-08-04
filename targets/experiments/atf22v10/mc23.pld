@@ -1,0 +1,19 @@
+Name     mc23;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Which row block and which S0/S1 pair belong to pin 23?
+   Pins 22 and 23 were previously covered only indirectly, by fb22 and
+   arch-comb-high, which required reading the answer out of a two-output
+   design. A single-macrocell design reads it directly, and makes the
+   "one design per macrocell" citation literally true. */
+PIN 2  = i0;
+PIN 23 = o0;
+
+o0 = i0;

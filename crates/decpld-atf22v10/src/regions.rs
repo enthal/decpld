@@ -143,7 +143,12 @@ pub fn regions_for(footprint: Footprint) -> Result<FuseRegions, RegionError> {
         },
     ];
 
-    if footprint >= Footprint::Gal {
+    // Matched explicitly rather than by `footprint >= Footprint::Gal`.
+    // The derived ordering is declaration order, which happens to agree
+    // with fuse count today — so a variant inserted in the wrong place
+    // would silently change which footprints carry a signature, and the
+    // `derive` says nothing about the order being load-bearing.
+    if matches!(footprint, Footprint::Gal | Footprint::PowerDown) {
         regions.push(FuseRegion {
             name: "user-signature",
             range: SIGNATURE_START..SIGNATURE_START + SIGNATURE_FUSES,
@@ -152,7 +157,7 @@ pub fn regions_for(footprint: Footprint) -> Result<FuseRegions, RegionError> {
         });
     }
 
-    if footprint == Footprint::PowerDown {
+    if matches!(footprint, Footprint::PowerDown) {
         regions.push(FuseRegion {
             name: "power-down",
             range: POWER_DOWN_FUSE..POWER_DOWN_FUSE + 1,

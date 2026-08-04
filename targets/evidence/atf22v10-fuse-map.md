@@ -110,7 +110,7 @@ This began as five measurements with the other five interpolated, and the row ta
 
 Block sizes follow from contiguity: block *i* ends where block *i−1* begins, and the topmost ends at row 131. They agree with Galette's `OLMC_SIZE_22V10`.
 
-Experiments: `mc14` … `mc23` (ten designs), plus `arch-comb-high` and `fb22`.
+Experiments: `mc14` … `mc23`, one single-macrocell design each. Pins 22 and 23 are additionally corroborated by `fb22` and `arch-comb-high`, which read the same values out of two-output designs.
 
 ## Rows 0 and 131: the device-wide control terms
 
