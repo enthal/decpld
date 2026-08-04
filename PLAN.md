@@ -35,10 +35,11 @@ M0 hardening, from the sub-agent reviews over the milestone's diff:
 
 - [x] Silent-corruption fixes: bare-CR line termination, offsets inside a multi-byte unit, a writer that could emit text it could not reparse — [#17](https://github.com/enthal/decpld/pull/17)
 - [x] Contradictory `F` and `G` fields refused rather than resolved by reading order — [#17](https://github.com/enthal/decpld/pull/17)
-- [ ] JEDEC identifier tables re-transcribed with locators; reserved identifiers honoured — [#18](https://github.com/enthal/decpld/issues/18)
-- [ ] Writer refuses unencodable content by the standard's `<field character>` class — [#19](https://github.com/enthal/decpld/issues/19)
+- [x] JEDEC identifier tables re-transcribed with locators; reserved identifiers honoured — [#25](https://github.com/enthal/decpld/pull/25)
+- [x] Writer refuses unencodable content by the standard's `<field character>` class, and the parser reports it at an offset — [#25](https://github.com/enthal/decpld/pull/25)
 - [ ] A file with no `F` field no longer silently means `F0` — [#20](https://github.com/enthal/decpld/issues/20)
-- [ ] `apply_fuse_list` applies atomically — [#21](https://github.com/enthal/decpld/issues/21)
+- [x] `apply_fuse_list` applies atomically — [#25](https://github.com/enthal/decpld/pull/25)
+- [x] Fields with no identifier reported and preserved rather than silently deleted — [#25](https://github.com/enthal/decpld/pull/25)
 - [ ] SPEC.md sync and property-test coverage gaps — [#22](https://github.com/enthal/decpld/issues/22), [#23](https://github.com/enthal/decpld/issues/23)
 
 ## M1 — ATF22V10 decoder and encoder
