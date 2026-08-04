@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# deCPLD pre-commit hook.
+#
+# Runs fmt + clippy + the markdown hard-wrap lint locally so style
+# regressions can't slip into a commit. Does NOT run the general
+# `cargo test` suite: the project follows a tests-first discipline
+# (CLAUDE.md), which means a failing behavioural test is expected to be
+# committed BEFORE the implementation that makes it pass. CI runs the
+# full suite and gates merge — that's where test failures block the
+# world. The markdown lint is the one exception: it is a deterministic
+# lint (never committed red-first), so it belongs here with fmt/clippy.
+#
+# Install with:
+#
+#     scripts/install-git-hooks.sh
+#
+# Skip once, deliberately (rare): git commit --no-verify
+# CLAUDE.md's commit protocol forbids routine --no-verify use.
+
+set -euo pipefail
+
+# Colors, but only on a TTY.
+if [[ -t 1 ]]; then
+    BOLD=$'\033[1m'
+    RED=$'\033[31m'
+    GREEN=$'\033[32m'
+    DIM=$'\033[2m'
+    RESET=$'\033[0m'
+else
+    BOLD="" RED="" GREEN="" DIM="" RESET=""
+fi
+
+step() {
+    printf "%spre-commit:%s %s\n" "${BOLD}" "${RESET}" "$1"
+}
+
+fail() {
+    printf "%spre-commit failed:%s %s\n" "${RED}${BOLD}" "${RESET}" "$1" >&2
+    printf "%sto bypass (discouraged): git commit --no-verify%s\n" "${DIM}" "${RESET}" >&2
+    exit 1
+}
+
+# Run from the repo root regardless of where git invoked us.
+cd "$(git rev-parse --show-toplevel)"
+
+# Only check when there is something staged; empty commits still call
+# the hook but there is nothing to check.
+if git diff --cached --quiet; then
+    step "no staged changes; skipping"
+    exit 0
+fi
+
+step "cargo fmt --all -- --check"
+cargo fmt --all -- --check || fail "formatting issues; run: cargo fmt --all"
+
+step "cargo clippy --workspace --all-targets -- -D warnings"
+cargo clippy --workspace --all-targets -- -D warnings || fail "clippy warnings"
+
+# A deterministic *lint*, not a behavioural test — never committed
+# red-first — so it belongs here alongside fmt/clippy rather than in
+# CI-only territory.
+step "markdown no-hardwrap lint"
+scripts/markdown-no-hardwrap.sh \
+    || fail "markdown is hard-wrapped; one line per paragraph (see failures above)"
+
+printf "%spre-commit passed%s %s(behavioural tests are CI's job; see scripts/git-hooks/pre-commit header)%s\n" \
+    "${GREEN}" "${RESET}" "${DIM}" "${RESET}"
