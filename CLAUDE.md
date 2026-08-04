@@ -80,7 +80,21 @@ Split by layer: the cost of getting a fuse encoding wrong is not the cost of a m
 
 ### Strict layer — test written FIRST, same commit
 
-Write a failing test **before** any implementation lands; it must fail (or not compile) on the pre-change tree. That is how you know the test validates behavior rather than transcribing it. Applies to:
+Write a failing test **before** the implementation it covers; it must fail (or not compile) on the pre-change tree. That is how you know the test validates behavior rather than transcribing it.
+
+**The unit is one change, not one milestone.** This does not mean writing a milestone's tests up front — that would lock interfaces before they are designed. It means each thing you add or change gets its test immediately before it. The interface commitment stays one change wide, so a later redesign rewrites a handful of tests rather than a suite.
+
+**Establish the expected answer before you write the test.** A test is only as good as the evidence behind it, and there is almost always a source of truth to consult first. The order is *discovery → test → implementation*:
+
+- **Device behavior and fuse mappings:** run the WinCUPL oracle experiment **first**, then write the test from what it reported, then write the code. Cite the fixture or run in the test so that if the oracle is later shown wrong, every test that trusted it can be found. Remember the oracle reports what WinCUPL does, which is evidence of correctness, not proof of it — triangulation still applies.
+- **Language semantics, JEDEC, and IR:** SPEC.md is the oracle. Cite the section.
+- **A bug fix:** the reproduction is the expected answer.
+
+**If you are not certain the expected answer is right, say so in the test.** An `// UNVERIFIED:` comment naming what you are unsure of and what would settle it is honest and greppable. A confidently wrong test that nobody flagged costs far more than a hedged one.
+
+**Experimenting in real code first is allowed, and should be rare.** If you genuinely cannot tell what the code should do until you have felt it out, do that — then throw the spike away and start again from the test. Needing this often is a signal that you are working ahead of the spec, not a signal that the rule is wrong.
+
+Applies to:
 
 - **JEDEC** — parsing, writing, fuse checksum, transmission checksum, `QF`/`F`/`L`/`C`/`G`/`N` fields, unknown-field preservation, line-ending and whitespace variants.
 - **Device models** — fuse region classification, AND-matrix cube encoding, macrocell config fields, polarity, feedback selection, and encode/decode round-trip for every legal configuration.
