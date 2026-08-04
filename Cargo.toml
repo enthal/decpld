@@ -27,7 +27,18 @@ authors = ["Timothy James"]
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
+# Every dependency — internal or third-party — is declared here once and
+# inherited with `dep.workspace = true`, so the workspace can only ever
+# agree on one version.
 [workspace.dependencies]
-# Populated as crates arrive. Every third-party dependency is declared
-# here once and inherited with `dep.workspace = true`, so the whole
-# workspace always agrees on a version.
+decpld-diagnostics = { path = "crates/decpld-diagnostics" }
+decpld-jedec = { path = "crates/decpld-jedec" }
+
+# Derived error types. Keeps the "errors identify object context" rule
+# (CLAUDE.md) cheap enough that there is no excuse for a bare String.
+thiserror = "2"
+
+# Command-line parsing for the `decpld` binary. Matches the sibling
+# enthal projects; SPEC.md Part VIII specifies a nested subcommand tree
+# that is not worth hand-rolling.
+clap = { version = "4", features = ["derive"] }

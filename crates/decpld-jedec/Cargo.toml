@@ -1,0 +1,17 @@
+[package]
+name = "decpld-jedec"
+description = "JEDEC fuse-map file parsing, writing, and checksums. Device-independent by construction."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+decpld-diagnostics.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
