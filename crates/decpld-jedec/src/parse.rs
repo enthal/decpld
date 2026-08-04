@@ -18,7 +18,7 @@ use decpld_diagnostics::{Diagnostic, DiagnosticBundle, FileId, Label, Span, Text
 const STX: u8 = 0x02;
 const ETX: u8 = 0x03;
 
-/// How tolerant the parser is of what it finds. SPEC.md §5.6.
+/// How tolerant the parser is of what it finds. SPEC.md §6.2.
 ///
 /// The three modes differ in exactly one dimension — what happens to a
 /// field deCPLD does not model — because that is the only decision where

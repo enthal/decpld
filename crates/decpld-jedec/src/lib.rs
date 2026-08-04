@@ -1,7 +1,7 @@
 //! JEDEC fuse-map files.
 //!
 //! JEDEC transfers numbered fuse/cell states; it does **not** define
-//! device architecture (SPEC.md §5.6). Nothing in this crate knows what
+//! device architecture (SPEC.md §6.2). Nothing in this crate knows what
 //! a macrocell is, which fuse selects a polarity, or that ATF22V10
 //! exists. That is the layering rule, and it is also what makes the
 //! crate useful: it can read a file for a part it has never heard of.

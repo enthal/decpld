@@ -505,14 +505,14 @@ proptest! {
 
     #[test]
     fn refusing_is_deterministic(file in any_possibly_unwritable_file()) {
-        // SPEC.md §5.32. A refusal that depended on anything ambient
+        // SPEC.md §13.2. A refusal that depended on anything ambient
         // would make `canonicalize` fail intermittently, which is worse
         // than failing.
         //
         // The whole `Result`, not just `is_ok()`. A writer whose field
         // order leaked `HashMap` iteration would emit different bytes on
         // each run and still have passed the weaker form — which would
-        // have made the §5.32 citation above decorative.
+        // have made the §13.2 citation above decorative.
         prop_assert_eq!(
             write(&file, WriterStyle::Canonical),
             write(&file, WriterStyle::Canonical)

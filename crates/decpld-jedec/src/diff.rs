@@ -1,6 +1,6 @@
 //! Comparing two JEDEC files.
 //!
-//! Compares *fuse vectors*, not file text (SPEC.md §5.12). Two files can
+//! Compares *fuse vectors*, not file text (SPEC.md §7.5). Two files can
 //! describe an identical device while sharing barely a byte — different
 //! `L` groupings, line endings, header, or field order. Diffing text
 //! would report all of that as change and bury the one fuse that
@@ -10,7 +10,7 @@ use crate::model::JedecFile;
 
 /// One fuse whose state differs between two files.
 ///
-/// SPEC.md §5.12 types the index as `FuseId`; that is a device-layer
+/// SPEC.md §7.5 types the index as `FuseId`; that is a device-layer
 /// concept, and this crate is architecture-free by construction, so a
 /// bare fuse number is used here. Classifying a delta as "polarity" or
 /// "mode" requires knowing what the fuse means, and belongs to the

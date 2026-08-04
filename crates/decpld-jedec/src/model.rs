@@ -1,4 +1,4 @@
-//! The parsed contents of a JEDEC file. SPEC.md §5.6.
+//! The parsed contents of a JEDEC file. SPEC.md §6.2.
 
 use crate::FuseVector;
 use decpld_diagnostics::Span;
@@ -62,7 +62,7 @@ pub struct JedecFile {
     ///
     /// The fuse count lives here rather than in a separate field, so a
     /// `fuse_count` that disagrees with the vector length is not a state
-    /// this type can represent. (SPEC.md §5.6 lists them separately;
+    /// this type can represent. (SPEC.md §6.2 lists them separately;
     /// collapsing them is recorded there as a deliberate deviation.)
     pub fuses: FuseVector,
 

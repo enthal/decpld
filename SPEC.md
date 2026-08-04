@@ -16,9 +16,13 @@
 
 **Status:** normative implementation specification and authoritative project document. A capable human or AI coding agent should be able to implement the complete system from this document.
 
+**Citing this document:** part and section numbers are stable identifiers, cited as `§13.2`. Once a number names a section it keeps naming it: new material appends a section or a part rather than renumbering what is already there. The argument is §8.3.1's argument for permanent diagnostic codes, one level up — source comments, commit messages, and issues quote section numbers, and a commit message cannot be rewritten once merged, so a number that quietly changes meaning turns a correct citation into a wrong one with nothing to show that it happened. Where a renumbering genuinely cannot be avoided, it rewrites every citation in the repository in the same commit and records the old-to-new mapping in the commit message.
+
 ---
 
-## 1. Objective
+# 0. Overview
+
+## 0.1 Objective
 
 deCPLD replaces WinCUPL as the design-entry, elaboration, synthesis, fitting, inspection, and JEDEC-generation tool for small PAL/GAL-compatible devices.
 
@@ -62,9 +66,9 @@ WinCUPL is a development oracle only. Production compilation must not require Wi
 
 ---
 
-## 2. Design principles
+## 0.2 Design principles
 
-### 2.1 Signals, not `wire` and `reg`
+### 0.2.1 Signals, not `wire` and `reg`
 
 The source declaration keyword is `signal`. It names a digital signal and its shape without claiming storage class or physical direction.
 
@@ -76,7 +80,7 @@ The compiler infers:
 
 Module boundaries remain explicit through `port`; module interfaces are never inferred from incidental use.
 
-### 2.2 One producer per signal bit
+### 0.2.2 One producer per signal bit
 
 Every signal bit has exactly one producer:
 
@@ -86,17 +90,17 @@ Every signal bit has exactly one producer:
 
 A curly-brace target is one composite assignment. Its constituent bits must be disjoint from every other producer target.
 
-### 2.3 No inferred latches
+### 0.2.3 No inferred latches
 
 A combinational value must be defined for all paths.
 
 Within `on posedge`, omitted assignment under a condition means that the register retains its current state. This is D-input feedback, not a level-sensitive latch.
 
-### 2.4 Expressions define hardware values
+### 0.2.4 Expressions define hardware values
 
 `if` and `match` are expressions. Multiple outputs are represented by one curly-brace packed vector expression and destructuring target.
 
-### 2.5 Declaration order never matters
+### 0.2.5 Declaration order never matters
 
 Files and declarations are indexed before bodies are resolved. A top or module may refer to declarations appearing later in the file or anywhere else in the package. File order, declaration order, and source-root order have no semantic effect.
 
@@ -109,25 +113,25 @@ Recommended style is root-first:
 
 The formatter never reorders declarations.
 
-### 2.6 Strict widths and signedness
+### 0.2.6 Strict widths and signedness
 
 Unsized integer literals are exact mathematical values until context supplies a width. No silent narrowing occurs. Unsigned widening zero-extends; signed widening sign-extends. Mixed-signedness arithmetic requires explicit conversion.
 
-### 2.7 Named module arguments only
+### 0.2.7 Named module arguments only
 
 Parameters and ports are connected by name. Positional instantiation is not part of the language.
 
-### 2.8 Explicit package boundaries
+### 0.2.8 Explicit package boundaries
 
 Directories form hierarchical packages. Declarations are private to their exact package by default. `public` exposes a declaration outside that package. Subpackages do not receive private access to parents. There is no `export` keyword or export list.
 
-### 2.9 Verified device knowledge
+### 0.2.9 Verified device knowledge
 
 Targets are typed Rust specifications. Every fuse mapping must be supported by official documentation, independent open-source cross-checking, controlled WinCUPL differential experiments, encode/decode invariants, or hardware tests.
 
 ---
 
-## 3. Repository structure
+## 0.3 Repository structure
 
 ```text
 decpld/
@@ -1543,7 +1547,7 @@ pub enum FuseWriteError {
 
 **The security fuse's guarantees are structural, not conventional.** A device model may not declare a security region that erases *set*, spans more than one fuse, or appears twice — all three are construction-time errors. Without the first, an "erased" map could arrive with the readback lock already engaged; without the second, `set_security_fuse` could half-program a region, which is the worst of the three outcomes since it is neither readable nor protected. Asking to lock a device that has no security fuse is an error rather than a silent success: the caller requested something irreversible, the device cannot do it, and answering "done" is the wrong end of "prefer a rejected build to a wrong one".
 
-`FuseRegions` is a validated type, and construction is the only way to obtain one: it checks that the regions partition `0..count` with no gap, no overlap, and no empty or backwards range. That makes §4.7's "every fuse is classified" and "fields do not overlap" hold for *every value of the type* rather than being asserted wherever someone remembers to — a device model that forgot a region cannot be built at all. Declaration order is not observable: the regions are sorted on construction, so a definition may list them in whatever order reads best (§2.5).
+`FuseRegions` is a validated type, and construction is the only way to obtain one: it checks that the regions partition `0..count` with no gap, no overlap, and no empty or backwards range. That makes §4.7's "every fuse is classified" and "fields do not overlap" hold for *every value of the type* rather than being asserted wherever someone remembers to — a device model that forgot a region cannot be built at all. Declaration order is not observable: the regions are sorted on construction, so a definition may list them in whatever order reads best (§0.2.5).
 
 Writing the same value twice is not a conflict. Two encoders agreeing is not a disagreement, and refusing it would make the order encoders run in observable. Writing a *different* value is refused, and the first write stands — averaging or last-writer-wins produces a device that behaves like neither design, with nothing to indicate it happened.
 
@@ -1811,9 +1815,9 @@ Before fuse encoding independently verify:
 
 ---
 
-# Part VI — Fuse encoding and JEDEC
+# 6. Fuse encoding and JEDEC
 
-## 5.5 Encoding order
+## 6.1 Encoding order
 
 1. Start with target erased/default fuse state.
 2. Encode global architecture mode.
@@ -1830,7 +1834,7 @@ Before fuse encoding independently verify:
 13. Decode generated fuses and compare to the physical design.
 14. Write JEDEC.
 
-## 5.6 JEDEC model
+## 6.2 JEDEC model
 
 JEDEC transfers numbered fuse/cell states; it does not define the target architecture.
 
@@ -1884,7 +1888,7 @@ The writer never invents a default: a file that arrived without an `F` field lea
 
 Parser modes: strict, compatible, preserve-unknown, selected by `--strictness`. Writer styles: canonical and compact, selected by `--style`.
 
-`WinCuplComparable` is **deferred to M1**, not merely unimplemented. Matching WinCUPL's layout requires having WinCUPL's output to match against, and inventing a format from memory and calling it "WinCUPL-comparable" is precisely the unevidenced guess §2.9 forbids. It lands with the oracle harness, against captured files.
+`WinCuplComparable` is **deferred to M1**, not merely unimplemented. Matching WinCUPL's layout requires having WinCUPL's output to match against, and inventing a format from memory and calling it "WinCUPL-comparable" is precisely the unevidenced guess §0.2.9 forbids. It lands with the oracle harness, against captured files.
 
 **Field identifiers are classified three ways, not two.** JEDEC 3A gives two BNF productions: `<field identifier>` (`A C D F G L N P Q R S T V X`) and `<reserved identifier>` (`B E H I J K M O U W Y Z`). They are disjoint and together cover A–Z exactly, which is the check a transcription of them must satisfy.
 
@@ -1906,13 +1910,13 @@ The writer always **recomputes** both checksums rather than copying what the inp
 
 JEDEC has no escape mechanism, so free text containing `*` cannot be encoded. The writer refuses rather than emitting a file that would silently read back as something else.
 
-**The writer verifies itself.** `write` parses its own output and compares it with the file it was given, and returns an error instead of a string if they differ. This is §5.27's encode-then-decode-then-compare rule applied to the writer rather than only to a test property: a test can only check the cases someone thought to generate, and this check does not depend on anyone having imagined the failure. It costs one extra parse of a file measured in kilobytes.
+**The writer verifies itself.** `write` parses its own output and compares it with the file it was given, and returns an error instead of a string if they differ. This is §12.1's encode-then-decode-then-compare rule applied to the writer rather than only to a test property: a test can only check the cases someone thought to generate, and this check does not depend on anyone having imagined the failure. It costs one extra parse of a file measured in kilobytes.
 
 Two limits on what it proves, both deliberate. It is a *self-consistency* check — the writer against deCPLD's own parser — not a conformance check against JEDEC 3A; any assumption the two share passes silently. And the comparison is made against the file as the writer is entitled to emit it, with value fields hoisted ahead of the programming fields as JEDEC 3A requires, since that reordering is a service to hand-built files rather than a corruption. A round-trip failure is therefore always a deCPLD bug, never a user error, and says so.
 
 Cross-check checksum implementations against WinCUPL, GALasm, Galette, and golden fixtures.
 
-## 5.7 JEDEC inspection
+## 6.3 JEDEC inspection
 
 ```bash
 decpld jed inspect design.jed --device ATF22V10C --package DIP24
@@ -1930,9 +1934,9 @@ Also provide `--json`.
 
 ---
 
-# Part VII — WinCUPL oracle workflow
+# 7. WinCUPL oracle workflow
 
-## 5.8 Purpose
+## 7.1 Purpose
 
 Use WinCUPL to independently generate:
 
@@ -1944,7 +1948,7 @@ Use WinCUPL to independently generate:
 
 Triangulate results with official datasheets, GALasm/Galette, round-trip invariants, and physical hardware. WinCUPL is not assumed infallible.
 
-## 5.9 Wine and command-line environment
+## 7.2 Wine and command-line environment
 
 WinCUPL is a GUI over command-line programs including `cupl.exe` and device libraries. Provide a project wrapper with configurable paths:
 
@@ -1991,9 +1995,9 @@ For every run record:
 
 Do not redistribute proprietary WinCUPL files or embedded serial numbers.
 
-## 5.10 Output files
+## 7.3 Output files
 
-Retain every generated artifact **in the run's scratch directory** (not in the repository — §5.14), including where supported:
+Retain every generated artifact **in the run's scratch directory** (not in the repository — §7.7), including where supported:
 
 - `.JED` fuse map;
 - `.DOC` compiled/minimized equations and device information;
@@ -2026,7 +2030,7 @@ fixture/
 └── manifest.json
 ```
 
-## 5.11 Experiment suite
+## 7.4 Experiment suite
 
 Generate minimal controlled designs.
 
@@ -2079,7 +2083,7 @@ G16V8AS simple
 G16V8   auto
 ```
 
-## 5.12 Differential analysis
+## 7.5 Differential analysis
 
 Parse JEDEC files and compare fuse vectors, not raw text.
 
@@ -2117,7 +2121,7 @@ decpld oracle diff baseline.jed changed.jed --device ATF22V10C
 
 A mapping becomes verified only when multiple independent fixtures agree, invariants hold, encode/decode round-trips, and preferably hardware testing succeeds.
 
-## 5.13 Metadata parsing
+## 7.6 Metadata parsing
 
 Normalize `.DOC`, `.LST`, `.ABS`, and `.EQN` into:
 
@@ -2134,7 +2138,7 @@ pub struct CuplReport {
 
 Extract selected device, pins, equations, `.D/.CK/.OE` extensions, product-term counts, mode, warnings, and compiler version where present. Treat report grammar as oracle tooling, not a stable production dependency.
 
-## 5.14 Fixture generation
+## 7.7 Fixture generation
 
 Generate CUPL fixtures from a typed fixture model rather than hand-writing hundreds of files:
 
@@ -2154,15 +2158,15 @@ For sequential fixtures, generate D truth tables from an independent expected-be
 
 The distinction is between an *artifact* and a *measurement*. WinCUPL's `.jed`, `.doc`, `.lst` and `.abs` files are its work product and stay out of the repository; the numbers read out of them — a column index, a fuse's state, a checksum — are facts about the device and belong in `targets/evidence/` and in the target definition that cites them. An evidence record quoting `QF5892` is not redistributing WinCUPL any more than quoting a datasheet's pinout redistributes the datasheet.
 
-What is committed is the *input* and the *recipe*: the generated `.pld` sources, the run metadata of §5.9, and a runner that reproduces the result. Together they let anyone with WinCUPL re-derive and audit a claim, which is a stronger guarantee than a checked-in output file — a golden file proves only that something once matched, while a recipe plus a measurement can be re-run against a different WinCUPL build and disagree loudly.
+What is committed is the *input* and the *recipe*: the generated `.pld` sources, the run metadata of §7.2, and a runner that reproduces the result. Together they let anyone with WinCUPL re-derive and audit a claim, which is a stronger guarantee than a checked-in output file — a golden file proves only that something once matched, while a recipe plus a measurement can be re-run against a different WinCUPL build and disagree loudly.
 
-`ComparisonLevel::ExactFile` (§5.25) accordingly compares deCPLD's output against a *normalised, deCPLD-generated* pinned artifact, not against a retained WinCUPL file. §5.10's retained run directory is a scratch working directory, not a committed one.
+`ComparisonLevel::ExactFile` (§11.1) accordingly compares deCPLD's output against a *normalised, deCPLD-generated* pinned artifact, not against a retained WinCUPL file. §7.3's retained run directory is a scratch working directory, not a committed one.
 
 CI verifies deCPLD against *itself* — encode/decode round-trips, region partition invariants, minimisation equivalence — none of which need an oracle. A CI job that reached for WinCUPL would contradict the product, since compiling must never require WinCUPL, Wine, or Windows. The experiment runner is developer-only, in the same spirit as `targets/evidence/verify-references.sh`.
 
-Cross-checks against *open-source* implementations are a separate matter: Galette and GALasm are freely redistributable, and `targets/fixtures/jedec/` carries their output under its own licence with attribution. Two independent implementations agreeing is what raises a mapping to `OpenSourceCrossChecked` (§5.31), and nothing here weakens that.
+Cross-checks against *open-source* implementations are a separate matter: Galette and GALasm are freely redistributable, and `targets/fixtures/jedec/` carries their output under its own licence with attribution. Two independent implementations agreeing is what raises a mapping to `OpenSourceCrossChecked` (§13.1), and nothing here weakens that.
 
-## 5.15 Hardware validation
+## 7.8 Hardware validation
 
 A mapping is not fully trusted only because WinCUPL agrees.
 
@@ -2186,13 +2190,13 @@ Discover the exact programmer part name from the installed tool.
 
 ---
 
-# Part VIII — CLI and reports
+# 8. CLI and reports
 
-## 5.16 Build and package discovery
+## 8.1 Build and package discovery
 
 deCPLD has two build modes.
 
-### 5.16.1 Single-file mode
+### 8.1.1 Single-file mode
 
 A single source file requires no manifest:
 
@@ -2214,7 +2218,7 @@ decpld build design.decpld --top CounterDemo
 
 Single-file mode has no external package dependencies.
 
-### 5.16.2 Multi-file package mode
+### 8.1.2 Multi-file package mode
 
 A `decpld.toml` manifest defines the package source roots, dependencies, and persistent options.
 
@@ -2251,7 +2255,7 @@ decpld build \
 
 The compiler indexes the entire package, selects one named top, and elaborates only the module graph reachable from that top. Syntax, duplicate-name, visibility, and interface errors are package-level; device fitting applies only to the selected reachable design.
 
-### 5.16.3 Build options
+### 8.1.3 Build options
 
 ```text
 --top QUALIFIED_NAME
@@ -2275,7 +2279,7 @@ The compiler indexes the entire package, selects one named top, and elaborates o
 
 Round-trip and equivalence validation are enabled by default.
 
-## 5.17 Other commands
+## 8.2 Other commands
 
 ```bash
 decpld check design.decpld
@@ -2296,11 +2300,11 @@ decpld oracle generate-suite --device ATF22V10C
 decpld oracle analyze-suite targets/fixtures/atf22v10
 ```
 
-`--strictness` selects the parser mode. It is deliberately **not** called `--mode`: §5.16.3 already gives `decpld build --mode auto|registered|complex|simple`, which is the ATF16V8 datasheet's own word for its global modes, and `jed inspect --device` will report one. Two unrelated meanings of `--mode` on one command is a collision worth spending a longer flag name to avoid.
+`--strictness` selects the parser mode. It is deliberately **not** called `--mode`: §8.1.3 already gives `decpld build --mode auto|registered|complex|simple`, which is the ATF16V8 datasheet's own word for its global modes, and `jed inspect --device` will report one. Two unrelated meanings of `--mode` on one command is a collision worth spending a longer flag name to avoid.
 
 `--style` selects the writer style. Both default to the tolerant choice: `preserve-unknown` and `canonical`.
 
-### 5.17.1 Exit codes
+### 8.2.1 Exit codes
 
 The `jed` commands follow `diff(1)`, so they compose into scripts:
 
@@ -2326,7 +2330,7 @@ Optional programming convenience must be explicit and never run automatically:
 decpld program build/design.jed --programmer minipro --part ATF22V10C
 ```
 
-## 5.18 Diagnostics
+## 8.3 Diagnostics
 
 ```rust
 pub struct Diagnostic {
@@ -2358,7 +2362,7 @@ error[E2207]: no ATF16V8 mode can implement this design
 
 Every fit error must identify the limiting resource and actionable alternatives.
 
-### 5.18.1 Diagnostic code ranges
+### 8.3.1 Diagnostic code ranges
 
 Codes render as `E` followed by four zero-padded digits. The thousands digit selects the layer, so a code identifies where a failure came from before anyone looks it up:
 
@@ -2377,9 +2381,9 @@ Codes are permanent. Once `E0204` means "value does not fit", it always means th
 
 ---
 
-# Part IX — Simulation and equivalence
+# 9. Simulation and equivalence
 
-## 5.19 RTL simulator
+## 9.1 RTL simulator
 
 Cycle semantics:
 
@@ -2392,11 +2396,11 @@ Cycle semantics:
 
 Support `Z` for pad observation. Internal simulation may remain two-state in version 1.
 
-## 5.20 Physical simulator
+## 9.2 Physical simulator
 
 Decode a generated fuse map into physical equations and simulate that model. Require RTL and decoded-fuse simulation to agree for exhaustive small tests and randomized larger tests.
 
-## 5.21 Equivalence checks
+## 9.3 Equivalence checks
 
 Verify:
 
@@ -2410,7 +2414,7 @@ Use exhaustive enumeration for small support sets and a SAT or BDD implementatio
 
 ---
 
-## 5.22 Autoformatter
+## 9.4 Autoformatter
 
 `decpld` includes a canonical source formatter:
 
@@ -2435,9 +2439,9 @@ The formatter operates on the lossless syntax tree and should format syntactical
 
 ---
 
-# Part X — Language server
+# 10. Language server
 
-## 5.23 Executable and architecture
+## 10.1 Executable and architecture
 
 Executable: `decpld-lsp`.
 
@@ -2464,7 +2468,7 @@ fn diagnostics(db: &dyn Db, file: FileId, target: TargetSelection)
 
 The LSP gives syntax/type diagnostics without a target and target-specific pin/fitting diagnostics when a device is known.
 
-## 5.24 Required LSP features
+## 10.2 Required LSP features
 
 - diagnostics;
 - semantic tokens;
@@ -2540,9 +2544,9 @@ Debounce fitting and cancel stale work.
 
 ---
 
-# Part XI — Testing and milestones
+# 11. Testing and milestones
 
-## 5.25 Test layers
+## 11.1 Test layers
 
 - lexer/parser snapshots and error recovery;
 - formatter idempotence;
@@ -2570,7 +2574,7 @@ pub enum ComparisonLevel {
 
 Use exact comparison only for deliberately pinned oracle experiments. Normal compilation acceptance requires semantic and physical correctness.
 
-## 5.26 Milestones
+## 11.2 Milestones
 
 ### M0 — JEDEC foundation
 
@@ -2606,9 +2610,9 @@ Fuzzing, reproducible builds, stable JSON reports, packaging, complete evidence 
 
 ---
 
-# Part XII — Key logic
+# 12. Key logic
 
-## 5.27 Compile driver
+## 12.1 Compile driver
 
 ```rust
 pub fn compile(req: CompileRequest) -> Result<CompileArtifacts, DiagnosticBundle> {
@@ -2660,7 +2664,7 @@ pub fn compile(req: CompileRequest) -> Result<CompileArtifacts, DiagnosticBundle
 }
 ```
 
-## 5.28 Priority match lowering
+## 12.2 Priority match lowering
 
 ```rust
 fn lower_priority_match(arms: &[ConditionArm], else_value: ValueId) -> ValueId {
@@ -2670,7 +2674,7 @@ fn lower_priority_match(arms: &[ConditionArm], else_value: ValueId) -> ValueId {
 }
 ```
 
-## 5.29 Cube encoding
+## 12.3 Cube encoding
 
 ```rust
 fn encode_cube(
@@ -2697,7 +2701,7 @@ fn encode_cube(
 }
 ```
 
-## 5.30 Fitter recursion
+## 12.4 Fitter recursion
 
 ```rust
 fn search(
@@ -2731,9 +2735,9 @@ fn search(
 
 ---
 
-# Part XIII — Evidence, safety, and definition of done
+# 13. Evidence, safety, and definition of done
 
-## 5.31 Evidence levels
+## 13.1 Evidence levels
 
 ```rust
 pub enum EvidenceLevel {
@@ -2746,7 +2750,7 @@ pub enum EvidenceLevel {
 
 Production target fields must meet the project's configured evidence threshold. Unverified hypotheses belong only in oracle-analysis code or disabled experimental targets.
 
-## 5.32 Safety
+## 13.2 Safety
 
 - Security fuse clear by default.
 - Programming security requires both `--security-fuse` and `--acknowledge-readback-lock`.
@@ -2756,7 +2760,7 @@ Production target fields must meet the project's configured evidence threshold. 
 - Same source, compiler, target database, and options produce the same fuse vector.
 - Timestamps are excluded in reproducible mode.
 
-## 5.33 Primary references
+## 13.3 Primary references
 
 Keep exact revisions and hashes in `targets/evidence/`.
 
@@ -2787,7 +2791,7 @@ Keep exact revisions and hashes in `targets/evidence/`.
 
 Numeric fuse mappings are not accepted merely because one source states them; they must satisfy differential and round-trip tests.
 
-## 5.34 Definition of done
+## 13.4 Definition of done
 
 Version 1 is complete when:
 

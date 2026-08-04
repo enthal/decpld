@@ -4,7 +4,7 @@ use crate::is_field_character;
 use crate::model::{JedecField, JedecFile};
 use crate::transmission_checksum;
 
-/// How the output is laid out. SPEC.md §5.6.
+/// How the output is laid out. SPEC.md §6.2.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WriterStyle {
     /// Every fuse stated explicitly, one field per line, 32 fuses per
@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn output_is_deterministic() {
-        // SPEC.md §5.32: the same inputs must produce the same bytes.
+        // SPEC.md §13.2: the same inputs must produce the same bytes.
         let file = parse(SAMPLE, FILE).unwrap().file;
         let a = write(&file, WriterStyle::Canonical).unwrap();
         let b = write(&file, WriterStyle::Canonical).unwrap();

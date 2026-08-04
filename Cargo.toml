@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-# Every crate lives under `crates/`. SPEC.md §3 names the full target
+# Every crate lives under `crates/`. SPEC.md §0.3 names the full target
 # layout (syntax, package, hir, types, rtl, logic, device, atf22v10,
 # atf16v8, jedec, sim, diagnostics, driver, cli, lsp, oracle); crates
 # are added as the milestones that need them land, not up front as
@@ -41,7 +41,7 @@ decpld-atf22v10 = { path = "crates/decpld-atf22v10" }
 thiserror = "2"
 
 # Command-line parsing for the `decpld` binary. Matches the sibling
-# enthal projects; SPEC.md Part VIII specifies a nested subcommand tree
+# enthal projects; SPEC.md §8 specifies a nested subcommand tree
 # that is not worth hand-rolling.
 clap = { version = "4", features = ["derive"] }
 

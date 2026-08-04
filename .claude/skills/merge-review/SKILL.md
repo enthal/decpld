@@ -22,7 +22,7 @@ Review the diff against these criteria, in priority order. The first three are w
 
 3. **Device evidence** — for any diff touching a target definition, fuse mapping, matrix, macrocell, or JEDEC encoding:
    - Does every new or changed fuse position cite its evidence in a source comment?
-   - Is the claimed `EvidenceLevel` (SPEC.md §5.31) actually supported by what was done — or is a hypothesis wearing a verified label?
+   - Is the claimed `EvidenceLevel` (SPEC.md §13.1) actually supported by what was done — or is a hypothesis wearing a verified label?
    - **A numeric fuse position with no cited evidence is a High finding, always.** This is the single easiest way to poison the project, and it is invisible until hardware misbehaves.
 
 4. **Spec adherence** — compare against [SPEC.md](../../../SPEC.md) for the changed area. Flag any divergence in type shapes, field names, trait signatures, semantics, diagnostic codes, CLI flags, or invariants. A normative change that did **not** update SPEC.md in the same commit is a finding (the never-drift rule).

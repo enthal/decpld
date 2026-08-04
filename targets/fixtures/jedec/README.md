@@ -13,7 +13,7 @@ Redistributed under the MIT licence, retrieved 2026-08-04. Galette is an indepen
 
 ## Why these files earn their place
 
-**They are the cross-check.** Each carries a `C` fuse checksum that Galette computed with its own implementation, from its own fuse data. deCPLD parses the `L` fields, computes the checksum with code that never saw Galette's, and lands on the same `0x403E` over 2194 fuses. Two independent implementations agreeing on that is what moves the checksum algorithm from "matches the standard's worked example" to `OpenSourceCrossChecked` (SPEC.md §5.31).
+**They are the cross-check.** Each carries a `C` fuse checksum that Galette computed with its own implementation, from its own fuse data. deCPLD parses the `L` fields, computes the checksum with code that never saw Galette's, and lands on the same `0x403E` over 2194 fuses. Two independent implementations agreeing on that is what moves the checksum algorithm from "matches the standard's worked example" to `OpenSourceCrossChecked` (SPEC.md §13.1).
 
 That agreement also validates **fuse placement**, not just arithmetic. A checksum that matched while any fuse sat at the wrong index would be a coincidence worth roughly one chance in 65,536.
 

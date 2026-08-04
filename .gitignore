@@ -19,7 +19,7 @@ Thumbs.db
 /build/
 /out/
 
-# WinCUPL oracle installation and run artifacts (SPEC.md Part VII).
+# WinCUPL oracle installation and run artifacts (SPEC.md §7).
 # WinCUPL is proprietary: its executables, device libraries, and any
 # embedded serial numbers must never be redistributed from this repo.
 # Only the *derived, normalized* fixtures under `targets/fixtures/` are
