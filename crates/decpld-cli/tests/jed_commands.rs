@@ -101,7 +101,7 @@ fn strict_mode_rejects_what_the_default_mode_accepts() {
     let file = dir.write("nosum.jed", "\x02h*QF8*F0*L0 11110000*\x03");
 
     assert!(decpld(&["jed", "validate", &arg(&file)]).status.success());
-    let strict = decpld(&["jed", "validate", &arg(&file), "--mode", "strict"]);
+    let strict = decpld(&["jed", "validate", &arg(&file), "--strictness", "strict"]);
     assert!(!strict.status.success(), "strict should reject: {}", stdout(&strict));
 }
 
@@ -191,7 +191,7 @@ fn canonicalize_writes_a_file_that_validates() {
 
     // Strict mode is the strongest available check that the rewritten
     // file carries correct checksums: it verifies both.
-    let check = decpld(&["jed", "validate", &arg(&output), "--mode", "strict"]);
+    let check = decpld(&["jed", "validate", &arg(&output), "--strictness", "strict"]);
     assert!(check.status.success(), "canonical output must be strictly valid: {}", stderr(&check));
 }
 

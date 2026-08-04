@@ -1842,7 +1842,9 @@ The writer never invents a default: a file that arrived without an `F` field lea
 
 **Allocation ceiling.** `QF` alone drives allocation, so an unbounded value turns a 19-byte file into hundreds of megabytes. A device-independent ceiling — this layer knows nothing about devices — rejects absurd counts before allocating. It sits far above any real part and is a guard against malformed input, not a device limit.
 
-Parser modes: strict, compatible, preserve-unknown. Writer styles: canonical, compact, WinCUPL-comparable.
+Parser modes: strict, compatible, preserve-unknown, selected by `--strictness`. Writer styles: canonical and compact, selected by `--style`.
+
+`WinCuplComparable` is **deferred to M1**, not merely unimplemented. Matching WinCUPL's layout requires having WinCUPL's output to match against, and inventing a format from memory and calling it "WinCUPL-comparable" is precisely the unevidenced guess §2.9 forbids. It lands with the oracle harness, against captured files.
 
 **Field identifiers are classified three ways, not two.** JEDEC 3A gives two BNF productions: `<field identifier>` (`A C D F G L N P Q R S T V X`) and `<reserved identifier>` (`B E H I J K M O U W Y Z`). They are disjoint and together cover A–Z exactly, which is the check a transcription of them must satisfy.
 
@@ -1856,7 +1858,7 @@ Splitting a field into identifier and body is a separate question from classifyi
 
 An unmodelled field must also survive its own notation. The writer renders each one and splits it back; if it would not read as the field it came from — an empty identifier followed by a body starting with a letter has no JEDEC spelling, because the body becomes the identifier — it is refused, naming what was asked for and what it would have become. Asking the question by round-tripping rather than by a rule about safe shapes means the check cannot drift from the splitter it has to agree with. Without it these cases still failed safely, via the whole-file verification, but reported an internal error for a caller-fixable condition.
 
-Retaining a non-conformant field means `decpld jed canonicalize` can emit a file that `decpld jed validate --mode strict` then rejects. That is the intended trade and not a defect: preserving what the input actually contained beats inventing a conformant substitute for it, and the non-conformance is reported both times. A user who wants the field gone can ask for it with compatible mode.
+Retaining a non-conformant field means `decpld jed canonicalize` can emit a file that `decpld jed validate --strictness strict` then rejects. That is the intended trade and not a defect: preserving what the input actually contained beats inventing a conformant substitute for it, and the non-conformance is reported both times. A user who wants the field gone can ask for it with compatible mode.
 
 **An `L` field applies all or nothing.** States are accumulated and committed only once the whole field is known good, so no fault can leave the fuse vector half-updated. Every bad state character in a field is reported, not just the first — one run should tell the user everything wrong with the file. A fuse number past `QF` is the exception and stops the field: every state after it is out of range too, so continuing would emit one diagnostic per remaining character, all saying the same thing.
 
@@ -2043,11 +2045,29 @@ Parse JEDEC files and compare fuse vectors, not raw text.
 
 ```rust
 pub struct FuseDelta {
-    pub index: FuseId,
+    pub index: u32,
     pub before: bool,
     pub after: bool,
 }
+
+pub struct JedecDiff {
+    /// Set when the two files declare different fuse counts, in which
+    /// case `fuses` is empty.
+    pub fuse_count: Option<(u32, u32)>,
+    pub fuses: Vec<FuseDelta>,
+    pub default_fuse: Option<(Option<bool>, Option<bool>)>,
+    pub security: Option<(Option<bool>, Option<bool>)>,
+    pub design_specification: Option<(String, String)>,
+    pub notes: Option<(Vec<String>, Vec<String>)>,
+    pub unknown_fields: Option<(Vec<String>, Vec<String>)>,
+}
 ```
+
+`index` is a bare `u32`, not a `FuseId`, and that is deliberate: `FuseId` is a device-layer concept, and `decpld-jedec` is architecture-free by construction. Classifying a delta as "polarity" or "mode" requires knowing what a fuse *means* and therefore belongs to the target that knows — so `decpld oracle diff --device` performs that classification over a `JedecDiff`, rather than the JEDEC layer producing pre-classified deltas it has no basis for.
+
+Differing fuse counts suppress the fuse comparison entirely. Fuse *N* of a 16-fuse device and fuse *N* of a 32-fuse device are not the same fuse, and listing deltas between them would bury the one finding that matters under a wall of noise.
+
+`JedecDiff` and `JedecFile::describes_same_device_as` must agree on what "the same file" means. Two notions that disagreed would let `jed diff` bless a rewrite that silently deleted a device's test vectors, which is why unmodelled fields are compared here and not merely preserved.
 
 Classify each delta as matrix connection, mode, polarity, OE, architecture-wide mode, signature/checksum, or unknown.
 
@@ -2214,8 +2234,8 @@ decpld report design.decpld --format text
 decpld report design.decpld --format json
 
 decpld jed inspect file.jed --device ATF22V10C
-decpld jed validate file.jed
-decpld jed canonicalize input.jed -o output.jed
+decpld jed validate file.jed --strictness strict|compatible|preserve-unknown
+decpld jed canonicalize input.jed -o output.jed --style canonical|compact
 decpld jed diff a.jed b.jed
 
 decpld oracle env
@@ -2223,6 +2243,30 @@ decpld oracle compile fixture.pld --out-dir result/
 decpld oracle generate-suite --device ATF22V10C
 decpld oracle analyze-suite targets/fixtures/atf22v10
 ```
+
+`--strictness` selects the parser mode. It is deliberately **not** called `--mode`: §5.16.3 already gives `decpld build --mode auto|registered|complex|simple`, which is the ATF16V8 datasheet's own word for its global modes, and `jed inspect --device` will report one. Two unrelated meanings of `--mode` on one command is a collision worth spending a longer flag name to avoid.
+
+`--style` selects the writer style. Both default to the tolerant choice: `preserve-unknown` and `canonical`.
+
+### 5.17.1 Exit codes
+
+The `jed` commands follow `diff(1)`, so they compose into scripts:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Nothing to report |
+| `1` | A finding — the command did its job and the answer is negative |
+| `2` | Trouble — the command could not do its job at all |
+
+The distinction is what makes the commands scriptable: collapsing "the files differ" into the same code as "the file could not be read" forces every caller to parse stderr to tell a result from a failure. Clap already exits `2` on a usage error, which is trouble of exactly the same kind.
+
+Which condition is a *finding* depends on what the command was asked to do, and the same words map to different codes:
+
+- `jed validate` on an invalid file exits **1**. "This file is not valid" *is* the answer.
+- `jed diff` on files that differ exits **1**; on an unreadable input, **2**.
+- `jed canonicalize` on an unreadable input exits **2**. It was asked to rewrite a file and could not.
+
+**Diagnostics always go to stderr and results always to stdout**, whether or not the operation succeeded. Which stream carries a diagnostic must depend on it being a diagnostic, never on the luck of the parse — otherwise `decpld jed canonicalize in.jed > out.jed` produces a fuse map with a warning glued to the front.
 
 Optional programming convenience must be explicit and never run automatically:
 

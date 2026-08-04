@@ -14,35 +14,135 @@
 use decpld_diagnostics::FileId;
 use decpld_diagnostics::{Span, TextRange};
 use decpld_jedec::{
-    FuseVector, JedecField, JedecFile, ParserMode, WriterStyle, parse, parse_with_mode, write,
+    FuseVector, JedecField, JedecFile, ParserMode, WriteError, WriterStyle, parse, parse_with_mode,
+    write,
 };
 use proptest::prelude::*;
 
 const FILE: FileId = FileId(0);
 
-/// Unmodelled fields, drawn from real JEDEC identifiers.
+/// Text a JEDEC field can legally carry.
 ///
-/// Included because their absence hid a bug: the writer normalised field
-/// bodies on the way *out*, so `QP 20*` came back as `QP20*` and a file
-/// differed from its own canonicalisation. A property that never
-/// generated these could not have found it — which is the argument for
-/// generating every field the model can hold, not just the interesting
-/// ones.
-fn any_unknown_fields() -> impl Strategy<Value = Vec<JedecField>> {
-    let field = prop_oneof![
-        // A value field, which the writer must hoist ahead of the fuse
-        // data, and a testing field, which it must not.
-        Just(("QP", "20")),
-        Just(("QV", "8")),
-        Just(("V", "0001 XXXXNHHHL")),
-        Just(("X", "0")),
-        Just(("P", "1 2 3 4")),
+/// Every character is inside JEDEC 3A's `<field character>` class, so
+/// content built from this can always be *spelled* — whether it can be
+/// written back unchanged is a separate question, which normalisation
+/// answers.
+///
+/// The alphabet is adversarial rather than realistic: the characters
+/// either side of the `*` gap in the class, the letters that decide
+/// whether an identifier needs a separator, and the spaces that
+/// parse-time normalisation trims.
+fn any_encodable_body() -> impl Strategy<Value = String> {
+    proptest::collection::vec(
+        prop_oneof![
+            Just('0'),
+            Just('1'),
+            Just('9'),
+            Just('a'),
+            Just('Z'),
+            Just(' '),
+            Just(')'),
+            Just('+'),
+            Just('~'),
+            Just('$'),
+        ],
+        0..12,
+    )
+    .prop_map(|chars| chars.into_iter().collect())
+}
+
+/// Text that may contain characters JEDEC cannot encode at all.
+///
+/// Kept separate from [`any_encodable_body`] and used only where a
+/// refusal is an expected outcome. Merging the two would make the
+/// round-trip properties fail on correct refusals — and the obvious fix
+/// for that is to drop `*` from the alphabet again, which is how the
+/// exclusion becomes load-bearing for an assertion instead of being an
+/// honest statement about what is being tested.
+fn any_body() -> impl Strategy<Value = String> {
+    proptest::collection::vec(
+        prop_oneof![
+            8 => any_char_in_class(),
+            // The field terminator, and control characters outside the
+            // class. These are the refusal paths, and nothing generated
+            // them before.
+            1 => Just('*'),
+            1 => prop_oneof![Just('\u{1}'), Just('\t'), Just('\u{7f}'), Just('\u{e9}')],
+        ],
+        0..12,
+    )
+    .prop_map(|chars| chars.into_iter().collect())
+}
+
+fn any_char_in_class() -> impl Strategy<Value = char> {
+    prop_oneof![
+        Just('0'),
+        Just('1'),
+        Just('a'),
+        Just('Z'),
+        Just(' '),
+        Just(')'),
+        Just('+'),
+        Just('~'),
     ]
-    .prop_map(|(identifier, body)| JedecField {
+}
+
+/// Whether any of a file's text lies outside `<field character>`.
+///
+/// The writer checks the header, every note, and both halves of every
+/// unmodelled field, so this mirrors exactly what it inspects.
+fn has_unencodable_character(file: &JedecFile) -> bool {
+    std::iter::once(&file.design_specification)
+        .chain(file.notes.iter())
+        .chain(file.unknown_fields.iter().flat_map(|f| [&f.identifier, &f.body]))
+        .flat_map(|text| text.chars())
+        .any(|ch| !decpld_jedec::is_field_character(ch))
+}
+
+/// Unmodelled fields over the whole space the model can hold.
+///
+/// Their absence hid a bug once: the writer normalised bodies on the way
+/// *out*, so `QP 20*` came back as `QP20*` and a file differed from its
+/// own canonicalisation. The first fix generated five realistic fields —
+/// whose bodies all began with a digit or a space, making it
+/// structurally incapable of producing the `Z custom` -> `Zcustom`
+/// corruption found later by hand.
+///
+/// So the identifiers now span all three JEDEC classes (defined,
+/// reserved, and not-an-identifier-at-all) and the bodies are arbitrary.
+/// A generator that can only produce the cases someone already thought
+/// of is a generator that can only find the bugs someone already found.
+fn any_unknown_fields() -> impl Strategy<Value = Vec<JedecField>> {
+    let identifier = prop_oneof![
+        // Value fields, which the writer must hoist ahead of the fuse
+        // data, and testing fields, which it must not.
+        Just("QP"),
+        Just("QV"),
+        Just("V"),
+        Just("X"),
+        Just("P"),
+        // Defined but unmodelled, including the `T` that was missing
+        // from the identifier table entirely.
+        Just("A"),
+        Just("T"),
+        Just("R"),
+        // Reserved: JEDEC 3A tells receivers to ignore these, and they
+        // must still survive a rewrite.
+        Just("J"),
+        Just("Z"),
+        // A Q subfield outside the three the standard defines.
+        Just("QX"),
+        // No identifier at all — legal for the model to hold, and the
+        // shape that used to be silently deleted.
+        Just(""),
+    ];
+
+    let field = (identifier, any_encodable_body()).prop_map(|(identifier, body)| JedecField {
         identifier: identifier.to_owned(),
-        body: body.to_owned(),
+        body,
         span: Span::new(FILE, TextRange::empty_at(0)),
     });
+
     // Value fields first, matching the canonical order the parser
     // establishes. A `JedecFile` is expected to hold them that way —
     // JEDEC 3A requires value fields before programming and testing
@@ -56,51 +156,180 @@ fn any_unknown_fields() -> impl Strategy<Value = Vec<JedecField>> {
     })
 }
 
+/// Notes, including the shapes parse-time normalisation changes.
+///
+/// Hard-coded to `Vec::new()` before, so a file with
+/// `notes: ["  spaced  "]` did not round-trip and nothing noticed:
+/// `write` returned `Ok` and silently changed the note.
+fn any_notes() -> impl Strategy<Value = Vec<String>> {
+    proptest::collection::vec(any_encodable_body(), 0..3)
+}
+
+/// Headers, including the empty one JEDEC cannot express the absence of.
+fn any_header() -> impl Strategy<Value = String> {
+    prop_oneof![Just(String::new()), Just("generated".to_owned()), any_encodable_body()]
+}
+
+/// Apply the transformations a parse applies, and drop what it could
+/// never have produced.
+///
+/// Not a general "normal form": it trims notes and bodies, and drops
+/// identifier-less fields whose body starts with a letter, because those
+/// have no JEDEC spelling. Over the encodable alphabet those are exactly
+/// the parse-reachable shapes — a claim measured, not assumed, at 6,497
+/// parses with zero files changed.
+///
+/// The parser trims field bodies and notes, so a model holding
+/// `"  spaced  "` describes a file that cannot be written back as
+/// itself — `write` refuses it, correctly. Normalising here lets the
+/// round-trip properties state "this always writes", which is a stronger
+/// and more useful claim than "this writes when it happens to".
+///
+/// The refusal path is not lost by doing this: it is asserted directly
+/// by the properties at the end of this file, over *un*-normalised
+/// files.
+fn normalise(mut file: JedecFile) -> JedecFile {
+    file.notes = file.notes.into_iter().map(|note| note.trim().to_owned()).collect();
+    file.unknown_fields = file
+        .unknown_fields
+        .into_iter()
+        .map(|mut field| {
+            // The parser trims a field's leading whitespace before
+            // splitting it, so an identifier carrying spaces is not a
+            // shape any parse can yield. Trimming bodies but not
+            // identifiers was an asymmetry with no justification behind
+            // it — found by the property below refusing ` ` + `` and
+            // being right to.
+            field.identifier = field.identifier.trim().to_owned();
+            field.body = field.body.trim().to_owned();
+            field
+        })
+        .filter(|field| {
+            // `split_identifier` yields either an empty identifier or a
+            // run of ASCII letters, so anything else is unreachable.
+            let identifier_is_reachable = field.identifier.chars().all(|c| c.is_ascii_alphabetic());
+            // And an identifier-less field whose body starts with a
+            // letter has no JEDEC spelling at all: written out, the body
+            // becomes the identifier.
+            let body_would_become_the_identifier = field.identifier.is_empty()
+                && field.body.starts_with(|c: char| c.is_ascii_alphabetic());
+            identifier_is_reachable && !body_would_become_the_identifier
+        })
+        .collect();
+    file
+}
+
 /// A file with an arbitrary fuse vector, default state, and metadata.
 fn any_jedec_file() -> impl Strategy<Value = JedecFile> {
     // Fuse counts deliberately include values that are not multiples of
     // eight, where the final partial word's padding bits decide whether
-    // the checksum is right.
+    // the checksum is right — and 0, which is a legal `QF` and the edge
+    // every "for each fuse" loop gets wrong first.
+    //
     // `default_fuse` is an Option, and `None` — a file that carries no
     // `F` field because it states every fuse explicitly — is a distinct
     // state the writer handles differently in BOTH styles. Generating
-    // only `Some` would leave the round trip blind to exactly the case
-    // that was just introduced.
+    // only `Some` would leave the round trip blind to it.
     (
-        1usize..300,
+        0usize..300,
         proptest::option::of(any::<bool>()),
-        any::<bool>(),
+        any_header(),
         proptest::option::of(any::<bool>()),
     )
-        .prop_flat_map(|(count, default, has_header, security)| {
+        .prop_flat_map(|(count, default, header, security)| {
             (
                 proptest::collection::vec(any::<bool>(), count),
                 Just(default),
-                Just(has_header),
+                Just(header),
                 Just(security),
                 any_unknown_fields(),
+                any_notes(),
             )
         })
-        .prop_map(|(states, default_fuse, has_header, security, unknown_fields)| {
+        .prop_map(|(states, default_fuse, header, security, unknown_fields, notes)| {
             let mut fuses = FuseVector::new(states.len() as u32, default_fuse.unwrap_or(false));
             for (index, state) in states.iter().enumerate() {
                 fuses.set(index as u32, *state).expect("in range by construction");
             }
             JedecFile {
-                design_specification: if has_header {
-                    "generated".to_owned()
-                } else {
-                    String::new()
-                },
+                design_specification: header,
                 fuses,
                 default_fuse,
-                notes: Vec::new(),
+                notes,
                 security,
                 fuse_checksum: None,
                 transmission_checksum: None,
                 unknown_fields,
             }
         })
+        .prop_map(normalise)
+}
+
+/// A file whose content is conformant JEDEC 3A, not merely
+/// representable.
+///
+/// The difference is the identifier-less field: the model can hold one
+/// and a rewrite must preserve it, but the standard has no such field,
+/// so strict mode rejects it. A property that parses its own output in
+/// strict mode has to exclude it or it is testing two things and
+/// blaming the wrong one.
+fn any_conformant_jedec_file() -> impl Strategy<Value = JedecFile> {
+    any_jedec_file().prop_map(|mut file| {
+        file.unknown_fields.retain(|field| !field.identifier.is_empty());
+        file
+    })
+}
+
+/// As [`any_jedec_file`], but *without* normalisation, and drawing from
+/// the wide alphabet — so it generates content the writer must refuse as
+/// well as content it must accept.
+fn any_possibly_unwritable_file() -> impl Strategy<Value = JedecFile> {
+    (
+        0usize..40,
+        proptest::option::of(any::<bool>()),
+        any_unencodable_header(),
+        any_unencodable_fields(),
+        proptest::collection::vec(any_body(), 0..3),
+        proptest::option::of(any::<bool>()),
+    )
+        .prop_map(|(count, default_fuse, header, unknown_fields, notes, security)| JedecFile {
+            design_specification: header,
+            fuses: FuseVector::new(count as u32, default_fuse.unwrap_or(false)),
+            default_fuse,
+            notes,
+            security,
+            fuse_checksum: None,
+            transmission_checksum: None,
+            unknown_fields,
+        })
+}
+
+fn any_unencodable_header() -> impl Strategy<Value = String> {
+    prop_oneof![Just(String::new()), Just("generated".to_owned()), any_body()]
+}
+
+/// Unmodelled fields whose text may be unencodable.
+///
+/// Identifiers are drawn from the wide alphabet too: `Z*Z` as an
+/// identifier was a real bug that emitted two fields, and only the
+/// identifier side could produce it.
+fn any_unencodable_fields() -> impl Strategy<Value = Vec<JedecField>> {
+    let identifier = prop_oneof![
+        Just("QP".to_owned()),
+        Just("V".to_owned()),
+        Just("Z".to_owned()),
+        Just(String::new()),
+        any_body(),
+    ];
+    let field = (identifier, any_body()).prop_map(|(identifier, body)| JedecField {
+        identifier,
+        body,
+        span: Span::new(FILE, TextRange::empty_at(0)),
+    });
+    proptest::collection::vec(field, 0..4).prop_map(|mut fields| {
+        fields.sort_by_key(|f| !f.is_value_field());
+        fields
+    })
 }
 
 proptest! {
@@ -139,7 +368,7 @@ proptest! {
     }
 
     #[test]
-    fn written_files_satisfy_their_own_checksums(file in any_jedec_file()) {
+    fn written_files_satisfy_their_own_checksums(file in any_conformant_jedec_file()) {
         // Strict mode verifies both checksums and requires the
         // transmission checksum to be present, so a successful strict
         // parse of our own output is the strongest statement available
@@ -168,5 +397,156 @@ proptest! {
             canonical.computed_fuse_checksum(),
             compact.computed_fuse_checksum()
         );
+    }
+}
+
+proptest! {
+    #[test]
+    fn a_normalised_file_always_writes(file in any_jedec_file()) {
+        // The generator produces content already in the form a parse
+        // yields, so refusal here would mean the writer cannot encode
+        // something it just read — the one outcome that would make
+        // `canonicalize` unusable.
+        //
+        // Stated separately from the round-trip properties for the
+        // failure message, not for coverage: they would catch a writer
+        // that refused everything too — `expect` panics rather than
+        // skipping — but they would report it as "round trip changed the
+        // file", which is not what went wrong.
+        prop_assert!(
+            write(&file, WriterStyle::Canonical).is_ok(),
+            "refused content a parse could have produced: {file:#?}"
+        );
+    }
+
+    #[test]
+    fn write_never_returns_text_that_reads_back_differently(
+        file in any_possibly_unwritable_file()
+    ) {
+        // Over arbitrary content, including content that cannot be
+        // encoded. The writer may refuse — that is the point — but it
+        // must never hand back a string that means something else.
+        //
+        // This is the invariant the internal guard exists to hold, and
+        // asserting it from outside is what would notice if the guard
+        // were ever made conditional or removed.
+        if let Ok(text) = write(&file, WriterStyle::Canonical) {
+            let reparsed = parse(&text, FILE).expect("our own output must parse").file;
+            prop_assert!(
+                file.describes_same_device_as(&reparsed),
+                "write returned text describing a different file:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refusal_is_always_justified(file in any_possibly_unwritable_file()) {
+        // Refusing is only honest if the content genuinely cannot be
+        // written back as itself. There are exactly two honest reasons,
+        // and the property has to name both:
+        //
+        //   1. the text contains a character JEDEC cannot spell at all;
+        //   2. the text is not in the form a parse produces, so writing
+        //      it would change it.
+        //
+        // The first version of this property asserted only (2). It
+        // passed — but only because the generator's alphabet excluded
+        // `*` and control characters, which made that exclusion
+        // load-bearing for the assertion rather than a statement about
+        // what was being tested. Widening the alphabet, which is what
+        // this PR set out to do, turned a *correct* refusal
+        // (`AsteriskInText`) into a property violation.
+        //
+        // A property that constrains its own inputs to stay green is
+        // worse than no property: the next person to widen the generator
+        // gets a red test whose obvious fix is to narrow it again.
+        if write(&file, WriterStyle::Canonical).is_err() {
+            let normalised = normalise(file.clone());
+            prop_assert!(
+                has_unencodable_character(&file)
+                    || write(&normalised, WriterStyle::Canonical).is_ok(),
+                "refused a file that is entirely encodable and that normalisation does not \
+                 save, so the refusal was about neither spelling nor form:\n{file:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unencodable_character_is_never_reported_as_an_internal_error(
+        file in any_possibly_unwritable_file()
+    ) {
+        // The regression #19 was filed against: content JEDEC cannot
+        // spell is a user-fixable condition, and `RoundTripFailed` says
+        // "internal error … This is a deCPLD bug; please report it",
+        // sending the user hunting for a compiler bug that is not there.
+        //
+        // Stated as "never RoundTripFailed" rather than "always names the
+        // character", because the writer checks fields in order: a file
+        // can hold an unencodable character *and* an earlier field that
+        // cannot be represented, and reporting the earlier one first is
+        // correct. The first version of this property demanded the
+        // stronger claim and failed on exactly that — a good refusal
+        // reported as a violation.
+        //
+        // Collapsing the named refusals into RoundTripFailed leaves every
+        // other property in this file green, so without this nothing
+        // guards the *diagnosis* — only the refusal's existence.
+        if has_unencodable_character(&file) {
+            let outcome = write(&file, WriterStyle::Canonical);
+            prop_assert!(outcome.is_err(), "emitted text JEDEC cannot spell:\n{file:#?}");
+            prop_assert_ne!(
+                outcome,
+                Err(WriteError::RoundTripFailed),
+                "a user-fixable spelling problem reported as an internal error: {:#?}",
+                file
+            );
+        }
+    }
+
+    #[test]
+    fn refusing_is_deterministic(file in any_possibly_unwritable_file()) {
+        // SPEC.md §5.32. A refusal that depended on anything ambient
+        // would make `canonicalize` fail intermittently, which is worse
+        // than failing.
+        //
+        // The whole `Result`, not just `is_ok()`. A writer whose field
+        // order leaked `HashMap` iteration would emit different bytes on
+        // each run and still have passed the weaker form — which would
+        // have made the §5.32 citation above decorative.
+        prop_assert_eq!(
+            write(&file, WriterStyle::Canonical),
+            write(&file, WriterStyle::Canonical)
+        );
+    }
+}
+
+/// `QF0` is legal, and is the edge every "for each fuse" loop gets wrong
+/// first. The old generator started at 1, so nothing exercised it —
+/// including the coverage check, where an empty device is vacuously
+/// complete.
+///
+/// An example test rather than a property: there are exactly three
+/// inputs, and running them 256 times each said nothing extra.
+#[test]
+fn a_zero_fuse_device_is_handled_like_any_other() {
+    for default_fuse in [None, Some(false), Some(true)] {
+        let file = JedecFile {
+            design_specification: "empty".to_owned(),
+            fuses: FuseVector::new(0, false),
+            default_fuse,
+            notes: Vec::new(),
+            security: None,
+            fuse_checksum: None,
+            transmission_checksum: None,
+            unknown_fields: Vec::new(),
+        };
+        for style in [WriterStyle::Canonical, WriterStyle::Compact] {
+            let text = write(&file, style).expect("a zero-fuse device is writable");
+            let reparsed = parse(&text, FILE).expect("and readable").file;
+            assert!(
+                file.describes_same_device_as(&reparsed),
+                "{default_fuse:?} {style:?}:\n{text}"
+            );
+        }
     }
 }
