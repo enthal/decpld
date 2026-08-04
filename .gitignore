@@ -44,11 +44,23 @@ Thumbs.db
 # Third-party reference documents. `targets/evidence/references.toml`
 # records each one's URL and sha256; the documents are copyrighted and
 # are re-fetched on demand by `targets/evidence/verify-references.sh`,
-# never committed. The manifest, README, and script are tracked.
+# never committed.
+#
+# The allowlist is by FILE TYPE, not by filename. Naming each tracked
+# file individually meant a new evidence record was silently ignored:
+# `git add -A` skipped it, the commit that claimed to add it did not,
+# and nothing failed — the project's own record of why a fuse number is
+# what it is went missing without a single error. An evidence document
+# that vanishes quietly is worse than one that was never written, since
+# the commit message asserts it exists.
+#
+# Third-party documents are PDFs and text dumps; ours are markdown,
+# TOML, and shell. Excluding by type keeps a fetched datasheet out
+# without swallowing the next thing we write.
 /targets/evidence/*
-!/targets/evidence/README.md
-!/targets/evidence/references.toml
-!/targets/evidence/verify-references.sh
+!/targets/evidence/*.md
+!/targets/evidence/*.toml
+!/targets/evidence/*.sh
 
 # Logs and scratch
 *.log

@@ -1993,7 +1993,7 @@ Do not redistribute proprietary WinCUPL files or embedded serial numbers.
 
 ## 5.10 Output files
 
-Retain every generated artifact, including where supported:
+Retain every generated artifact **in the run's scratch directory** (not in the repository — §5.14), including where supported:
 
 - `.JED` fuse map;
 - `.DOC` compiled/minimized equations and device information;
@@ -2150,13 +2150,17 @@ pub struct CuplFixture {
 
 For sequential fixtures, generate D truth tables from an independent expected-behavior model, not by invoking the deCPLD compiler.
 
-**The oracle's output is never committed, and CI never runs the oracle.**
+**WinCUPL's files are never committed, and CI never runs the oracle.**
 
-What goes into the repository is the *input* and the *recipe*: the generated `.pld` sources, the exact command line, and the run metadata of §5.9. That is everything needed to reproduce or audit a claim, and it redistributes nothing proprietary — the sources are ours, and WinCUPL's `.jed`, `.doc`, `.lst` and `.abs` files stay in a scratch directory. The claim itself is recorded in `targets/evidence/`, and the constants it justifies live in the device model citing it.
+The distinction is between an *artifact* and a *measurement*. WinCUPL's `.jed`, `.doc`, `.lst` and `.abs` files are its work product and stay out of the repository; the numbers read out of them — a column index, a fuse's state, a checksum — are facts about the device and belong in `targets/evidence/` and in the target definition that cites them. An evidence record quoting `QF5892` is not redistributing WinCUPL any more than quoting a datasheet's pinout redistributes the datasheet.
+
+What is committed is the *input* and the *recipe*: the generated `.pld` sources, the run metadata of §5.9, and a runner that reproduces the result. Together they let anyone with WinCUPL re-derive and audit a claim, which is a stronger guarantee than a checked-in output file — a golden file proves only that something once matched, while a recipe plus a measurement can be re-run against a different WinCUPL build and disagree loudly.
+
+`ComparisonLevel::ExactFile` (§5.25) accordingly compares deCPLD's output against a *normalised, deCPLD-generated* pinned artifact, not against a retained WinCUPL file. §5.10's retained run directory is a scratch working directory, not a committed one.
 
 CI verifies deCPLD against *itself* — encode/decode round-trips, region partition invariants, minimisation equivalence — none of which need an oracle. A CI job that reached for WinCUPL would contradict the product, since compiling must never require WinCUPL, Wine, or Windows. The experiment runner is developer-only, in the same spirit as `targets/evidence/verify-references.sh`.
 
-This also means a mapping is not defended by a golden file that happens to match. It is defended by an evidence record naming the experiment that established it, which a reader can re-run — and by deCPLD's own invariants, which hold whether or not an oracle is installed.
+Cross-checks against *open-source* implementations are a separate matter: Galette and GALasm are freely redistributable, and `targets/fixtures/jedec/` carries their output under its own licence with attribution. Two independent implementations agreeing is what raises a mapping to `OpenSourceCrossChecked` (§5.31), and nothing here weakens that.
 
 ## 5.15 Hardware validation
 

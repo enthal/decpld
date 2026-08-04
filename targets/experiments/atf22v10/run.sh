@@ -36,7 +36,7 @@ source_file="$here/${experiment}.pld"
 if [[ ! -f "$source_file" ]]; then
     printf 'no such experiment: %s\n' "$source_file" >&2
     printf 'available:\n' >&2
-    ls "$here"/*.pld | xargs -n1 basename | sed 's/\.pld$/  /' >&2
+    for candidate in "$here"/*.pld; do basename "$candidate" .pld; done >&2
     exit 2
 fi
 
@@ -50,31 +50,88 @@ cp "$source_file" "$work/"
 
 # Record what produced the result. A fuse mapping is only evidence if the
 # thing that produced it can be identified later (SPEC.md §5.9).
-prefix_path="${DECPLD_WINEPREFIX}/drive_c/${DECPLD_WIN_CUPL_ROOT#C:\\}"
-prefix_path="${prefix_path//\\//}"
-hash_of() { [[ -f "$1" ]] && shasum -a 256 "$1" | cut -d' ' -f1 || echo "(absent)"; }
+#
+# The hashes are taken of the executable and library that are ACTUALLY
+# used, derived from the same variables the command line is built from.
+# Hashing fixed paths instead meant `DECPLD_WIN_CUPL_EXE=...cupl40.exe`
+# ran one binary and recorded the hash of another — a provenance record
+# naming the wrong producer, which is worse than none, and precisely what
+# §5.9 exists to prevent.
+win_to_host() {
+    # C:\Foo\Bar -> $WINEPREFIX/drive_c/Foo/Bar, case-insensitively on
+    # the drive letter. Only drive C is mapped; anything else is a
+    # configuration this script cannot verify, and it says so rather
+    # than producing an unidentifiable record.
+    local win="$1"
+    case "$win" in
+        [Cc]:\\*) printf '%s/drive_c/%s\n' "$DECPLD_WINEPREFIX" "$(printf '%s' "${win:3}" | tr '\\' '/')" ;;
+        *) return 1 ;;
+    esac
+}
 
-command_line="${DECPLD_WIN_CUPL_EXE} -jaxfl g22v10 ${experiment}"
+hash_of() {
+    local host
+    if ! host="$(win_to_host "$1")"; then
+        printf 'cannot map %s to a host path; only drive C is handled\n' "$1" >&2
+        exit 2
+    fi
+    if [[ ! -f "$host" ]]; then
+        printf 'not found: %s (from %s)\n' "$host" "$1" >&2
+        printf 'refusing to record a run whose producer cannot be identified\n' >&2
+        exit 2
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$host" | cut -d' ' -f1
+    else
+        shasum -a 256 "$host" | cut -d' ' -f1
+    fi
+}
+
+# WinCUPL's own version, rather than a hand-copied string. §5.9 lists it
+# as a required field, and a version nobody captured cannot be checked
+# against a run.
+release_notes="$(win_to_host "${DECPLD_WIN_CUPL_ROOT}\\release_notes.txt" 2>/dev/null || true)"
+wincupl_version="unknown"
+if [[ -n "$release_notes" && -f "$release_notes" ]]; then
+    # release_notes.txt is CRLF, and a stray \r is an invalid JSON
+    # control character — it made the whole record unparseable while
+    # looking fine to a human reading it.
+    wincupl_version="$(sed -n 's/^Version:[[:space:]]*//p' "$release_notes" | head -1 | tr -d '\r\n')"
+    wincupl_version="${wincupl_version:-unknown}"
+fi
+
+# The device type comes from the source, not from this script. Three of
+# the experiments exist precisely to vary it (p22v10, g22v10, g22v10cp),
+# and a hardcoded `g22v10` would have compiled them under the wrong one
+# while still producing a plausible .jed.
+device="$(sed -n 's/^[[:space:]]*Device[[:space:]]\{1,\}\([A-Za-z0-9]\{1,\}\)[[:space:]]*;.*/\1/p' "$source_file" | head -1)"
+if [[ -z "$device" ]]; then
+    printf 'no Device declaration in %s\n' "$source_file" >&2
+    exit 2
+fi
+
+# Backslashes are legion in Windows paths and are not valid JSON escapes,
+# so the record has to escape them or it is not machine-readable.
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+# Built once and both run and recorded, so the record cannot describe a
+# different invocation from the one that happened.
+inner="set LIBCUPL=${DECPLD_WIN_CUPL_LIBRARY} && cd /d Z:${work//\//\\} && ${DECPLD_WIN_CUPL_EXE} -jaxfl ${device} ${experiment}"
+
 cat > "$work/run.json" <<JSON
 {
   "experiment": "${experiment}",
   "wine_version": "$(wine --version 2>/dev/null || echo unknown)",
-  "cupl_exe_sha256": "$(hash_of "${prefix_path}/Shared/cupl.exe")",
-  "device_library_sha256": "$(hash_of "${prefix_path}/Shared/cupl.dl")",
-  "command_line": "${command_line}",
-  "environment": { "LIBCUPL": "${DECPLD_WIN_CUPL_LIBRARY}" }
+  "wincupl_version": "${wincupl_version}",
+  "device_type": "${device}",
+  "cupl_exe_sha256": "$(hash_of "${DECPLD_WIN_CUPL_EXE}")",
+  "device_library_sha256": "$(hash_of "${DECPLD_WIN_CUPL_LIBRARY}")",
+  "command_line": "wine cmd /c \"$(json_escape "$inner")\"",
+  "environment": { "LIBCUPL": "$(json_escape "${DECPLD_WIN_CUPL_LIBRARY}")" }
 }
 JSON
 
-# The executable path is passed unquoted. SPEC.md §5.9's representative
-# wrapper quotes it, but `wine cmd` receives the backslashes literally
-# and reports "Can't recognize ... as an internal or external command".
-# The installed path contains no spaces, so quoting buys nothing here —
-# and §5.9 says to record what the installed executable actually does
-# rather than assume every release behaves alike.
-WINEPREFIX="$DECPLD_WINEPREFIX" wine cmd /c \
-    "set LIBCUPL=${DECPLD_WIN_CUPL_LIBRARY} && cd /d Z:${work//\//\\} && ${DECPLD_WIN_CUPL_EXE} -jaxfl g22v10 ${experiment}" \
-    >"$work/cupl.log" 2>&1 || true
+WINEPREFIX="$DECPLD_WINEPREFIX" wine cmd /c "$inner" >"$work/cupl.log" 2>&1 || true
 
 if [[ ! -f "$work/${experiment}.jed" ]]; then
     printf 'no JEDEC produced; see %s/cupl.log\n' "$work" >&2
