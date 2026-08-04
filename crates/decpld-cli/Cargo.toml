@@ -1,0 +1,21 @@
+[package]
+name = "decpld-cli"
+description = "Command-line driver for the deCPLD compiler: build, check, fmt, sim, report, and JEDEC inspection."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+# An application, not a library — never published to crates.io.
+publish = false
+
+# The crate is `decpld-cli`; the binary users type is `decpld`.
+[[bin]]
+name = "decpld"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

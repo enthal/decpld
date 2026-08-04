@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+# Every crate lives under `crates/`. SPEC.md §3 names the full target
+# layout (syntax, package, hir, types, rtl, logic, device, atf22v10,
+# atf16v8, jedec, sim, diagnostics, driver, cli, lsp, oracle); crates
+# are added as the milestones that need them land, not up front as
+# empty stubs.
+members = ["crates/*"]
+
+# Shared package metadata. Individual crates inherit with `field.workspace = true`.
+[workspace.package]
+edition = "2024"
+version = "0.0.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/enthal/decpld"
+rust-version = "1.95"
+authors = ["Timothy James"]
+
+# Lints applied to every workspace crate via `[lints] workspace = true`.
+#
+# `unsafe_code = "forbid"` is set here rather than as a `#![forbid(...)]`
+# in each crate root so it cannot be forgotten when a crate is added —
+# the same "make wrong states unrepresentable" reflex the compiler
+# itself is built on. deCPLD is a pure data-transformation pipeline
+# (text → IR → fuse vector); there is no FFI or hardware access in it,
+# so there is no legitimate reason for `unsafe` anywhere in the tree.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.dependencies]
+# Populated as crates arrive. Every third-party dependency is declared
+# here once and inherited with `dep.workspace = true`, so the whole
+# workspace always agrees on a version.
