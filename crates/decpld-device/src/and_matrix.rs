@@ -126,6 +126,14 @@ pub struct AndMatrixSpec {
     cells: Vec<Vec<MatrixCellSpec>>,
     row_positions_by_id: BTreeMap<ProductTermId, usize>,
     source_positions_by_id: BTreeMap<BoolInputId, usize>,
+    /// Where each fuse sits: `(row position, column)`.
+    ///
+    /// Built from the same pass that rejects a fuse used twice, so it
+    /// cannot disagree with the cells it indexes. It exists so
+    /// `position_of_fuse` is a lookup rather than a scan of every cell
+    /// on the device — §7.5 classifies one delta per changed fuse, and
+    /// a whole-array diff is thousands of them.
+    cell_positions_by_fuse: BTreeMap<FuseId, (usize, u32)>,
     columns: u32,
 }
 
@@ -197,13 +205,14 @@ impl AndMatrixSpec {
         // row: the invariant is about the device, and a fuse shared
         // between two *rows* is the same corruption as one shared
         // within a row.
-        let mut seen_fuses = BTreeSet::new();
-        for row_cells in &cells {
-            for cell in row_cells {
+        let mut cell_positions_by_fuse: BTreeMap<FuseId, (usize, u32)> = BTreeMap::new();
+        for (position, row_cells) in cells.iter().enumerate() {
+            for (column, cell) in row_cells.iter().enumerate() {
                 if cell.connected_value == cell.disconnected_value {
                     return Err(MatrixError::CellCannotDistinguish { fuse: cell.fuse });
                 }
-                if !seen_fuses.insert(cell.fuse) {
+                let column = u32::try_from(column).unwrap_or(u32::MAX);
+                if cell_positions_by_fuse.insert(cell.fuse, (position, column)).is_some() {
                     return Err(MatrixError::FuseUsedTwice { fuse: cell.fuse });
                 }
             }
@@ -243,7 +252,15 @@ impl AndMatrixSpec {
             }
         }
 
-        Ok(Self { rows, sources, cells, row_positions_by_id, source_positions_by_id, columns })
+        Ok(Self {
+            rows,
+            sources,
+            cells,
+            row_positions_by_id,
+            source_positions_by_id,
+            cell_positions_by_fuse,
+            columns,
+        })
     }
 
     #[must_use]
@@ -271,6 +288,17 @@ impl AndMatrixSpec {
     #[must_use]
     pub fn row_cells(&self, row: ProductTermId) -> Option<&[MatrixCellSpec]> {
         self.row_positions_by_id.get(&row).map(|&position| self.cells[position].as_slice())
+    }
+
+    /// The row and column a fuse sits at, or `None` if this matrix has
+    /// no cell there.
+    ///
+    /// The inverse of the cell grid, and what turns "fuse 52 changed"
+    /// into "row 1, column 8" for §7.5's delta classification.
+    #[must_use]
+    pub fn position_of_fuse(&self, fuse: FuseId) -> Option<(ProductTermSpec, u32)> {
+        let &(position, column) = self.cell_positions_by_fuse.get(&fuse)?;
+        Some((*self.rows.get(position)?, column))
     }
 
     /// The literal source for an input.

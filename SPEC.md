@@ -2475,7 +2475,44 @@ Differing fuse counts suppress the fuse comparison entirely. Fuse *N* of a 16-fu
 
 `JedecDiff` and `JedecFile::describes_same_device_as` must agree on what "the same file" means. Two notions that disagreed would let `jed diff` bless a rewrite that silently deleted a device's test vectors, which is why unmodelled fields are compared here and not merely preserved.
 
-Classify each delta as matrix connection, mode, polarity, OE, architecture-wide mode, signature/checksum, or unknown.
+Classify each delta as matrix connection, mode, polarity, OE, architecture-wide mode, signature/checksum, or unknown. `decpld-device` answers, because that is the layer that owns fuse semantics:
+
+```rust
+pub enum FuseMeaning {
+    MatrixCell {
+        row: ProductTermId,
+        role: ProductTermRole,
+        input: BoolInputId,
+        polarity: Polarity,
+        source: PhysicalSignalSource,
+    },
+    ConfigField {
+        macrocell: Option<MacrocellId>,
+        field: &'static str,
+        id: ConfigFieldId,
+        bit: u32,
+    },
+    UserSignature { region: &'static str, byte: u32, bit: u32 },
+    SecurityFuse,
+    Other { region: &'static str, mutability: FuseMutability },
+    Unknown { fuse: FuseId },
+}
+
+pub fn classify_fuse(
+    fuse: FuseId,
+    matrix: &AndMatrixSpec,
+    specs: &[MacrocellSpec],
+    regions: &FuseRegions,
+) -> FuseMeaning;
+```
+
+**It introduces no device knowledge.** Everything it consults is already stated by an `AndMatrixSpec`, a `MacrocellSpec`, or a `FuseRegions`, so one implementation serves every target — a device model that describes itself gets classification for free, and there is no second table to drift from the first.
+
+**The matrix is consulted before the regions.** A region can only say "programmable"; the matrix knows which literal of which product term a cell carries, and that is the whole content of a matrix delta. Asking the coarser source first would discard the finer answer.
+
+`Unknown` is reported rather than guessed at. `oracle diff` and `jed inspect` both read files this compiler did not write, and inventing a meaning for an address outside the model is exactly the unevidenced guess §0.2.9 forbids. Every fuse *inside* the model must classify as something else, which is §4.7's "every fuse is classified" read through the classifier.
+
+`AndMatrixSpec::position_of_fuse` is the inverse of the cell grid — the lookup that turns "fuse 52 changed" into "row 1, column 8". It is built from the same pass that rejects a fuse used twice, so it cannot disagree with the cells it indexes.
 
 ```bash
 decpld oracle diff baseline.jed changed.jed --device ATF22V10C
