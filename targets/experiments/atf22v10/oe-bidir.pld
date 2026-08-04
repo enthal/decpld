@@ -1,0 +1,27 @@
+Name     oe-bidir;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* SPEC.md 7.4, output enable: bidirectional readback.
+
+   Pin 23 is driven when `e` is high and read back into pin 22 the rest
+   of the time -- the same pin as both output and input, which is the
+   case `ioin*` could not reach because nothing drove those pins. If the
+   feedback column measured by `fb23` and the input column measured by
+   `ioin23` are the same column, this design uses it in both directions
+   at once and the two measurements describe one path. */
+
+PIN 2  = i0;
+PIN 3  = e;
+PIN 22 = o1;
+PIN 23 = io0;
+
+io0    = i0;
+io0.oe = e;
+o1     = io0;

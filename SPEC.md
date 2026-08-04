@@ -1891,7 +1891,7 @@ Encode and verify:
 - common global clock;
 - macrocell feedback;
 - reset/preset resources if and as represented in the verified map;
-- `MacrocellMode::InputOnly` is **supported but not encodable**: the architecture region is exactly two fuses per macrocell and both are spoken for by polarity and mode, so an undriven cell is indistinguishable in those bits from a combinational active-low output. What differs is the output-enable term, left permanently false. That the term is the *mechanism* is an inference pending §7.4's output-enable experiments, so `MacrocellSpec::supports` reports the capability while the mode field refuses to encode it, and a fitter must reach for the output-enable term rather than the field;
+- `MacrocellMode::InputOnly` is **supported but not encodable**: the architecture region is exactly two fuses per macrocell and both are spoken for by polarity and mode, so an undriven cell is indistinguishable in those bits from a combinational active-low output. The mechanism is the output-enable term, held permanently false, and §7.4's experiments measure it: `oe-never` requests a permanently disabled output and produces an enable row with every link intact, architecture bits untouched and data row unchanged, while `oe-always` is bit-identical to a design that says nothing about the enable. So `MacrocellSpec::supports` reports the capability, the mode field refuses to encode it, and a fitter reaches for the output-enable term rather than the field;
 - matrix, architecture, signature, security, and reserved fuse regions.
 
 Builder:

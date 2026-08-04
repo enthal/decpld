@@ -1,0 +1,29 @@
+Name     oe-var;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* SPEC.md 7.4, output enable: `Y.OE = E`.
+
+   The one control this project has never measured. `ioin14`..`ioin23`
+   showed an undriven I/O pin leaving its output-enable row entirely
+   intact, and the claim that the OE ROW is what holds the pin off is an
+   INFERENCE from it being the only remaining control in the fuse map --
+   not a measurement. This design drives the enable from a pin, so the
+   row must carry that pin's literal, at an address this experiment
+   reads directly.
+
+   Held constant against `oe-always`: same data term, same pins, same
+   macrocell. Only the enable expression varies. */
+
+PIN 2  = i0;
+PIN 3  = e;
+PIN 23 = o0;
+
+o0    = i0;
+o0.oe = e;

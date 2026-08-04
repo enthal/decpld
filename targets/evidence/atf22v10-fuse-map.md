@@ -224,7 +224,7 @@ The columns are identical to the `fb*` sweep's feedback columns. An I/O pin reac
 
 All ten were measured rather than generalised from one. The feedback column map runs opposite to the pin numbering, so confirming pin 14 and pin 23 says nothing about the eight between them, and this document has already been wrong once in exactly that shape.
 
-The undriven macrocell is left combinational and active low in every one of the ten (S1 set, S0 clear in its architecture pair), and its output-enable row is left entirely intact. Whether the pin is held off by that row or by the architecture bits is *not* determined by these experiments — an all-intact product term is constantly false, which would disable the output, but no experiment here varies the two independently. The output-enable experiments of SPEC.md §7.4 are still to do.
+The undriven macrocell is left combinational and active low in every one of the ten (S1 set, S0 clear in its architecture pair), and its output-enable row is left entirely intact. Which of the two holds the pin off is settled by [Output enable](#output-enable) below, not by these experiments: `oe-never` asks for a permanently disabled output *without* changing the architecture bits and gets the same all-intact enable row, so the row is the mechanism and the architecture bits are incidental.
 
 ### Pins 12 and 24 are refused as signals
 
@@ -235,6 +235,47 @@ That the datasheet calls them GND and VCC is what says *which rail each is* — 
 Both declare `EXPECT refusal` on a line of their own, which `run.sh` reads: it reports the refusal as a result and exits 0, so a batch re-run of the suite does not stop on them, and it fails loudly if the oracle ever *accepts* one — an accepted design would mean the claim is wrong, which is the outcome worth shouting about.
 
 The marker sits inside a CUPL comment. `marker-inert` is `in2` carrying the same words and must still compile: `pwr12` and `pwr24` fail for their own reasons, so neither can show that the marker is inert rather than a syntax error being mistaken for the refusal under test.
+
+## Output enable
+
+SPEC.md §7.4's output-enable experiments. Four designs on pin 23, differing **only** in the enable expression, with the data term `o0 = i0` (pin 2) held constant throughout. Pin 23's block is rows 1 and 2: row 1 is the enable row, fuses 44–87; row 2 is its first data row, 88–131.
+
+| experiment | `.oe` | array blown | enable row |
+|---|---|---|---|
+| `in2` | *not written* | 44–91, 93–131 | 44–87 entirely blown |
+| `oe-always` | `'b'1` | 44–91, 93–131 | 44–87 entirely blown |
+| `oe-var` | `e` (pin 3) | 44–51, 53–91, 93–131 | intact at 52 |
+| `oe-var-not` | `!e` | 44–52, 54–91, 93–131 | intact at 53 |
+| `oe-never` | `'b'0` | 88–91, 93–131 | 44–87 entirely **intact** |
+
+Four findings, in increasing order of consequence.
+
+**CUPL's default enable is "always", and it is the empty product term.** `oe-always` is bit-identical to `in2` — zero fuse deltas across all 5892 — so writing `o0.oe = 'b'1` and writing nothing produce the same part. The encoding is the enable row with every link blown, which is a product term with no literals: the empty AND, constantly true.
+
+**The enable row is an ordinary product-term row.** `oe-var` moves exactly one fuse from `in2`, to 52 = 44·1 + 8, and column 8 is pin 3's true column in [Columns: signal sources](#columns-signal-sources). Same column map, same addressing, no special encoding.
+
+**Complement is true + 1 there too.** `oe-var-not` moves the intact link to 53, column 9. The pair is what establishes the sense: one design alone leaves a single intact link consistent with either polarity until a second design moves it.
+
+**A permanently disabled pad is the enable row entirely intact.** `oe-never` leaves all 44 links of row 1 connected — every literal at both polarities, which no input can satisfy — while row 2 keeps its data term unchanged. This is the finding the `ioin*` experiments could only guess at: it varies the enable *without* touching the architecture bits, so the enable row is demonstrably the mechanism that holds a pin off. Note which row moved, too: a compiler expressing "off" by emptying the data term would have moved row 2 instead.
+
+The two states are therefore opposites at the same 44 fuses, and getting them the wrong way round turns every undriven pin into a permanently driven one.
+
+### Bidirectional readback uses the feedback column
+
+Experiment `oe-bidir`: pin 23 is driven when `e` is high and read into pin 22 the rest of the time — one pin as output and input at once, which the `ioin*` designs could not reach because nothing drove those pins.
+
+| row | extent | intact | column | meaning |
+|---|---|---|---|---|
+| 1 | 44–87 | 52 | 8 | pin 23's enable = pin 3 |
+| 2 | 88–131 | 92 | 4 | pin 23's data = pin 2 |
+| 10 | 440–483 | none | — | pin 22's enable, always |
+| 11 | 484–527 | 486 | 2 | pin 22's data = pin 23 |
+
+Column 2 is both what the `fb*` sweep recorded for pin 23's **feedback** and what `ioin23` recorded for pin 23 as an undriven **input**. Measured separately, they are one path used in both directions — which is why a pad has no input resource of its own in the model.
+
+Pin 22's architecture pair reads S0 = 1, S1 = 1 (fuses 5810 and 5811 blown), combinational and active high, as expected for `o1 = io0`.
+
+Experiments: `oe-always`, `oe-var`, `oe-var-not`, `oe-never`, `oe-bidir`. All five compile; none needs an `EXPECT refusal` marker.
 
 ## The three JEDEC footprints, and the power-down fuse
 

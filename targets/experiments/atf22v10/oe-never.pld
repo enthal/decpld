@@ -1,0 +1,28 @@
+Name     oe-never;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* SPEC.md 7.4, output enable: always DISABLED.
+
+   The decisive design. deCPLD encodes a permanently-off pad as an
+   output-enable row with every link INTACT -- constantly false -- and
+   that encoding has never been checked against the oracle. If WinCUPL
+   writes the same thing here, the inference behind
+   `supports_input_only` becomes a measurement.
+
+   A `.pld` may not compile at all: a constantly-disabled output is
+   arguably a design error, and CUPL may say so. That refusal is itself
+   evidence, and `EXPECT refusal` is not asserted here precisely because
+   which way this goes is the question. */
+
+PIN 2  = i0;
+PIN 23 = o0;
+
+o0    = i0;
+o0.oe = 'b'0;

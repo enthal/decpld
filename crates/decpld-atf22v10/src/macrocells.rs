@@ -96,11 +96,16 @@ pub fn macrocells() -> Result<Vec<MacrocellSpec>, MacrocellError> {
             // `mode_field`, and asking it to encode `InputOnly` is an
             // error rather than a silent substitution.
             //
-            // What differs in those designs is the output-enable row,
-            // left entirely intact. That the row is the mechanism is an
-            // inference from it being the only remaining control in the
-            // fuse map, not a measurement; SPEC.md §7.4's output-enable
-            // experiments would settle it.
+            // The mechanism is the output-enable row, and that is now
+            // measured rather than inferred. `oe-never` asks for a
+            // permanently disabled output (`o0.oe = 'b'0`) and gets the
+            // enable row entirely intact — every literal at both
+            // polarities, constantly false — with the architecture bits
+            // untouched and the data row unchanged. `oe-always` is
+            // bit-identical to a design that says nothing about the
+            // enable, so the opposite state is the row entirely blown.
+            // A fitter reaching for input-only must therefore turn the
+            // enable row off, not reach for a configuration field.
             supports_input_only: true,
             // `Pin` is measured — an undriven I/O pin reaches the array
             // through this macrocell's feedback column (`ioin*`), and a
