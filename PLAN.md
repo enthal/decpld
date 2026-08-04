@@ -47,7 +47,7 @@ M0 hardening, from the sub-agent reviews over the milestone's diff:
 Decode WinCUPL and Galette output into macrocells and equations; encode canonical equivalents; satisfy the round-trip invariants. Still no language.
 
 - [ ] `decpld-device`: `DeviceTarget` trait, `FuseMap` with write tracking, `FuseRegion`, `ConfigField`, `AndMatrixSpec`, `MacrocellSpec`, `PackageSpec` — `FuseMap`, `FuseRegions`, `FuseId`, `FuseMutability` landed in [#28](https://github.com/enthal/decpld/pull/28); the rest follow
-- [ ] `decpld-atf22v10`: DIP-24 package map, global clock, AND matrix, ten macrocells — every field citing its evidence
+- [ ] `decpld-atf22v10`: DIP-24 package map, global clock, AND matrix, ten macrocells — every field citing its evidence. Fuse regions, array geometry, column and row mapping, and the three JEDEC footprints landed in [#31](https://github.com/enthal/decpld/pull/31); package map, clock resources and the matrix/macrocell specs follow
 - [ ] Encode: cube encoding with contradiction rejection, then row decode-and-verify
 - [ ] Decode: fuse vector → `PhysicalDesign`
 - [ ] Invariants: matrix cells map 1:1 to fuses, no undocumented field overlap, every fuse classified, every legal configuration round-trips

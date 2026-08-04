@@ -96,20 +96,38 @@ therefore            j = 9 - i
 
 The two orderings run in opposite directions. Cross-checking the open-source implementations surfaced this as a discrepancy and could not settle it; only the experiment could. It is the single most likely place for a mapping to be silently transposed, which is why it is stated explicitly here.
 
-Confirmed at five points spanning the whole range, by driving one macrocell at a time:
+Measured for **every** macrocell, one design each:
 
-| pin | 23 | 22 | 20 | 17 | 14 |
-|---|---|---|---|---|---|
-| first row of block | 1 | 10 | 34 | 83 | 122 |
-| S0/S1 pair index | 0 | 1 | 3 | 6 | 9 |
+| pin | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| first row of block | 122 | 111 | 98 | 83 | 66 | 49 | 34 | 21 | 10 | 1 |
+| S0 fuse | 5826 | 5824 | 5822 | 5820 | 5818 | 5816 | 5814 | 5812 | 5810 | 5808 |
+| S0/S1 pair index | 9 | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
 
-Both relations hold at every point: *i* = pin − 14 and *j* = 23 − pin, hence *j* = 9 − *i*. Testing only the endpoints would have left a transposition in the middle undetected.
+Both relations hold at every point: *i* = pin − 14 and *j* = 23 − pin, hence *j* = 9 − *i*.
 
-Experiments: `arch-comb-high`, `fb22`, `mc14`, `mc17`, `mc20`.
+This began as five measurements with the other five interpolated, and the row table was adopted from Galette. The measured table turns out identical to Galette's `OLMC_ROWS_22V10` — but that is now a *cross-check* rather than the source. Interpolating between measured points is still not measuring, and a device whose two fuse orderings run in opposite directions is exactly the shape where an interpolation looks right at both ends and is wrong in the middle.
+
+Block sizes follow from contiguity: block *i* ends where block *i−1* begins, and the topmost ends at row 131. They agree with Galette's `OLMC_SIZE_22V10`.
+
+Experiments: `mc14` … `mc23`, one single-macrocell design each. Pins 22 and 23 are additionally corroborated by `fb22` and `arch-comb-high`, which read the same values out of two-output designs.
+
+## Rows 0 and 131: the device-wide control terms
+
+The ten macrocell blocks cover 130 of the 132 rows. Galette prints AR before its block listing and SP after it, which is suggestive — but print order is not a fuse map, and this was the last claim resting on inference rather than measurement.
+
+Driving each from a distinct pin identifies the row by which column stays intact:
+
+| row | intact column | that column belongs to | so the row is |
+|---|---|---|---|
+| 0 | 8 | pin 3 (`o0.ar = rst`) | asynchronous reset |
+| 131 | 12 | pin 4 (`o0.sp = pre`) | synchronous preset |
+
+Both are device-wide rather than per-macrocell, which is why they sit outside the ten blocks. The same design also reads S0 = 1, S1 = 0 on pin 23's pair — active high and registered — independently consistent with `o0.d`.
+
+Experiment: `global-ar-sp`.
 
 ## Evidence level
-
-Measured macrocell indices are *j* ∈ {0, 1, 3, 6, 9} (pins 23, 22, 20, 17, 14). The remaining five — pins 21, 19, 18, 16, 15 — follow the same two relations by interpolation, not by measurement, and the row-block table itself (`OLMC_ROWS_22V10`, `OLMC_SIZE_22V10`) is adopted from Galette rather than derived here. The interpolation is between measured points spanning the full range rather than beyond them, but it is still interpolation and the target must not claim otherwise.
 
 `DifferentiallyVerified` for everything above except where noted: each fact comes from a controlled WinCUPL experiment, and the region boundaries are additionally `OpenSourceCrossChecked` against Galette (`af52987`) and GALasm (`c376d56`) and confirmed by the datasheet. None of it is `HardwareVerified` — nothing here has been programmed onto a physical part.
 
@@ -158,6 +176,4 @@ All six bytes match exactly. So the 64-bit signature region holds the `PartNo` f
 Experiments: `arch-comb-high` (PartNo 00), `sig-partno-41`, `sig-partno-5A`.
 
 ## Not established
-- **Row-block extents for pins 21, 19, 18, 16, 15**, and the per-block sizes, which come from Galette rather than from an experiment here.
-- **Row 0 and row 131.** The 132 rows exceed the 130 accounted for by the ten blocks. Galette prints AR before the block listing and SP after it, which suggests row 0 is asynchronous reset and row 131 synchronous preset — but that is read off print order, not measured. No experiment here uses either.
 - **Which fuse value means "connected"** is taken from JEDEC 3A's definition (0 is a low-resistance link) rather than measured on hardware.

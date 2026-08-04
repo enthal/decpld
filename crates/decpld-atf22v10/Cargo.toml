@@ -1,0 +1,17 @@
+[package]
+name = "decpld-atf22v10"
+description = "ATF22V10C device model: fuse regions, array geometry, and macrocell mapping. Every constant cites the experiment that measured it."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+decpld-device.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
