@@ -112,6 +112,21 @@ Block sizes follow from contiguity: block *i* ends where block *i−1* begins, a
 
 Experiments: `mc14` … `mc23` (ten designs), plus `arch-comb-high` and `fb22`.
 
+## Rows 0 and 131: the device-wide control terms
+
+The ten macrocell blocks cover 130 of the 132 rows. Galette prints AR before its block listing and SP after it, which is suggestive — but print order is not a fuse map, and this was the last claim resting on inference rather than measurement.
+
+Driving each from a distinct pin identifies the row by which column stays intact:
+
+| row | intact column | that column belongs to | so the row is |
+|---|---|---|---|
+| 0 | 8 | pin 3 (`o0.ar = rst`) | asynchronous reset |
+| 131 | 12 | pin 4 (`o0.sp = pre`) | synchronous preset |
+
+Both are device-wide rather than per-macrocell, which is why they sit outside the ten blocks. The same design also reads S0 = 1, S1 = 0 on pin 23's pair — active high and registered — independently consistent with `o0.d`.
+
+Experiment: `global-ar-sp`.
+
 ## Evidence level
 
 `DifferentiallyVerified` for everything above except where noted: each fact comes from a controlled WinCUPL experiment, and the region boundaries are additionally `OpenSourceCrossChecked` against Galette (`af52987`) and GALasm (`c376d56`) and confirmed by the datasheet. None of it is `HardwareVerified` — nothing here has been programmed onto a physical part.
@@ -161,5 +176,4 @@ All six bytes match exactly. So the 64-bit signature region holds the `PartNo` f
 Experiments: `arch-comb-high` (PartNo 00), `sig-partno-41`, `sig-partno-5A`.
 
 ## Not established
-- **Row 0 and row 131.** The 132 rows exceed the 130 accounted for by the ten blocks. Galette prints AR before the block listing and SP after it, which suggests row 0 is asynchronous reset and row 131 synchronous preset — but that is read off print order, not measured. No experiment here uses either.
 - **Which fuse value means "connected"** is taken from JEDEC 3A's definition (0 is a low-resistance link) rather than measured on hardware.

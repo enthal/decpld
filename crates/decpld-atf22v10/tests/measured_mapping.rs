@@ -162,9 +162,9 @@ fn architecture_pairs_run_opposite_to_row_blocks() {
 #[test]
 fn row_blocks_partition_the_array_leaving_only_the_two_control_rows() {
     // Blocks must not overlap and must account for 130 of the 132 rows.
-    // The two left over are rows 0 and 131, which no experiment here
-    // exercises — the evidence document says so rather than guessing
-    // they are AR and SP.
+    // The two left over are the device-wide control terms, both
+    // measured (experiment global-ar-sp) rather than inferred from
+    // Galette's print order.
     let mut used = vec![false; ROWS as usize];
     for index in 0..Atf22v10Geometry::MACROCELLS {
         let block = G.row_block(MacrocellIndex(index)).expect("a block");
@@ -177,7 +177,11 @@ fn row_blocks_partition_the_array_leaving_only_the_two_control_rows() {
     }
     let unused: Vec<usize> =
         used.iter().enumerate().filter(|(_, u)| !**u).map(|(r, _)| r).collect();
-    assert_eq!(unused, vec![0, 131], "only the two control rows are unaccounted for");
+    assert_eq!(
+        unused,
+        vec![ASYNCHRONOUS_RESET_ROW as usize, SYNCHRONOUS_PRESET_ROW as usize],
+        "only the two device-wide control rows sit outside the macrocell blocks"
+    );
 }
 
 #[test]

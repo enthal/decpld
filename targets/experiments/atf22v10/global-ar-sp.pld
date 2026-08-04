@@ -1,0 +1,25 @@
+Name     global-ar-sp;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Rows 0 and 131 are the two the ten macrocell blocks do not cover.
+   Galette prints AR before its block listing and SP after, which is
+   suggestive but is print order, not a fuse map. Driving each from a
+   distinct pin identifies the row by which column stays intact:
+   pin 3 -> column 8 (AR), pin 4 -> column 12 (SP). */
+
+PIN 1  = clk;
+PIN 2  = i0;
+PIN 3  = rst;
+PIN 4  = pre;
+PIN 23 = o0;
+
+o0.d   = i0;
+o0.ar  = rst;
+o0.sp  = pre;

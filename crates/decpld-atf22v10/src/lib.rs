@@ -15,6 +15,7 @@ mod geometry;
 mod regions;
 
 pub use geometry::{
-    Atf22v10Geometry, COLUMNS, MacrocellIndex, PinNumber, ROWS, SignalSource, SourceKind,
+    ASYNCHRONOUS_RESET_ROW, Atf22v10Geometry, COLUMNS, MacrocellIndex, PinNumber, ROWS,
+    SYNCHRONOUS_PRESET_ROW, SignalSource, SourceKind,
 };
 pub use regions::{Footprint, FootprintError, regions_for};

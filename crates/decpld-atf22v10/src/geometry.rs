@@ -204,6 +204,21 @@ impl Atf22v10Geometry {
     }
 }
 
+/// The asynchronous-reset product term, shared by every macrocell.
+///
+/// Evidence: measured. `o0.ar = rst` with `rst` on pin 3 leaves row 0
+/// intact at column 8, which is pin 3's true column (experiment
+/// `global-ar-sp`). Previously inferred from Galette printing AR before
+/// its block listing — print order is not a fuse map.
+pub const ASYNCHRONOUS_RESET_ROW: u32 = 0;
+
+/// The synchronous-preset product term, shared by every macrocell.
+///
+/// Evidence: measured. `o0.sp = pre` with `pre` on pin 4 leaves row 131
+/// intact at column 12, which is pin 4's true column (experiment
+/// `global-ar-sp`).
+pub const SYNCHRONOUS_PRESET_ROW: u32 = 131;
+
 /// A macrocell's rows in the AND array.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowBlock {
