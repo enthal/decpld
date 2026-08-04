@@ -22,7 +22,7 @@ Crates are created by the milestone that needs them; SPEC.md §3 records the ful
 
 Parse, validate, canonicalize, and rewrite known JEDEC files with correct checksums. No device knowledge at all — `decpld-jedec` must work against a part it has never heard of.
 
-- [ ] `decpld-jedec` crate: `JedecFile` model, STX/ETX framing, `QF` / `F` / `L` / `C` / `N` / `G` fields
+- [x] `decpld-jedec` crate: `JedecFile` model, STX/ETX framing, `QF` / `F` / `L` / `C` / `N` / `G` fields — [#11](https://github.com/enthal/decpld/pull/11)
 - [x] Fuse checksum and transmission checksum, from the standard's own worked examples — [#10](https://github.com/enthal/decpld/pull/10)
 - [ ] Parser modes: strict, compatible, preserve-unknown
 - [ ] Writer styles: canonical, compact, WinCUPL-comparable

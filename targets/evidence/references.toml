@@ -45,7 +45,24 @@ algorithms did not have to be taken on trust from any implementation.
 Known erratum: the text says both checksums are computed "modulo 65,535". \
 The worked examples are consistent with ordinary 16-bit wraparound \
 (modulo 65,536), and every extant implementation uses 65,536. deCPLD \
-implements 65,536 and records the discrepancy at the call site.\
+implements 65,536 and records the discrepancy at the call site.
+
+Transcription defects in THIS copy — the prose is reliable, some examples \
+are not:
+
+1. The opening PLD 12S8 example prints L fields with no separator between \
+   the fuse number and the fuse states ("L001111101111..."), contradicting \
+   the body text at line 385, which requires a space or carriage return. \
+   deCPLD follows the body text and rejects unseparated L fields, because \
+   fuse states are 0 and 1 — also digits — so the field is genuinely \
+   ambiguous rather than merely unusual.
+
+2. The three "equivalent" fuse-list forms in the Fuse List Field section \
+   are not equivalent as printed: measured state counts are 108, 107, and \
+   four 27-state blocks placed on a 28-fuse stride. Characters have been \
+   lost somewhere in the document's history. These examples are therefore \
+   NOT used as golden tests; the checksum examples, which are internally \
+   consistent and verified arithmetically, are.\
 """
 
 [[reference]]

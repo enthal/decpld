@@ -11,8 +11,12 @@
 
 mod checksum;
 mod fuses;
+mod model;
+mod parse;
 
 pub mod codes;
 
 pub use checksum::{DUMMY_TRANSMISSION_CHECKSUM, transmission_checksum};
 pub use fuses::{FuseError, FuseVector};
+pub use model::{JedecField, JedecFile};
+pub use parse::{Parsed, parse};
