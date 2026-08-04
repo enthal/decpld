@@ -1560,6 +1560,18 @@ pub enum FuseWriteError {
     Security { fuse: FuseId },
     NoSecurityFuse,
 }
+
+impl FuseMap {
+    pub fn erased(regions: FuseRegions) -> Self;
+    pub fn from_states(regions: FuseRegions, states: impl IntoIterator<Item = bool>)
+        -> Result<Self, FuseStatesError>;
+}
+
+/// Why an existing fuse vector does not describe this device.
+pub enum FuseStatesError {
+    WrongLength { expected: u32, actual: usize },
+    Reserved { fuse: FuseId, region: &'static str, required: bool, found: bool },
+}
 ```
 
 **The security fuse's guarantees are structural, not conventional.** A device model may not declare a security region that erases *set*, spans more than one fuse, or appears twice — all three are construction-time errors. Without the first, an "erased" map could arrive with the readback lock already engaged; without the second, `set_security_fuse` could half-program a region, which is the worst of the three outcomes since it is neither readable nor protected. Asking to lock a device that has no security fuse is an error rather than a silent success: the caller requested something irreversible, the device cannot do it, and answering "done" is the wrong end of "prefer a rejected build to a wrong one".
@@ -1571,6 +1583,14 @@ Writing the same value twice is not a conflict. Two encoders agreeing is not a d
 `set_all` applies several writes or none of them, validating range, mutability, and conflict — against the map *and* against earlier entries in the same batch — before applying any. A partially applied write is the worst available outcome: the map is then neither the old design nor the new one, and a fuse checksum over a half-written map is a perfectly valid checksum over the wrong thing. Same rule as `decpld-jedec`'s fuse-list application, for the same reason.
 
 The security fuse is not reachable through the ordinary write path at all. It has its own method, so arriving at it is a deliberate act rather than the result of an encoder sweeping a fuse range.
+
+`from_states` is the counterpart to `erased`, and the way a fuse vector from a file this compiler did not write becomes something the device layer can decode — §6.3's `jed inspect` runs on it. Three rules:
+
+- **Every fuse is marked written.** The file stated all of them, so leaving them unclaimed would let a later encoder overwrite a value the file gave without `Conflict` ever firing.
+- **The length must be the device's fuse count.** A file's `QF` is its claim about which part it is for; padding or truncating would silently decode a foreign file as this device.
+- **A reserved fuse that disagrees is refused**, per §13.2 — a device in that state is not one the manufacturer defines, and describing it back as a valid design would lend it credibility it has not got.
+
+The security fuse *is* accepted here, unlike through `set_security_fuse`. That gate is about the act of locking a part; a file already carrying the bit is reporting a part somebody else locked, and refusing to read it would leave the case a user most needs explained the one case that cannot be.
 
 ## 4.3 Configuration fields
 
@@ -2199,6 +2219,79 @@ Report:
 - unused product terms;
 - reserved/security/signature status.
 
+`decpld-report` builds it, from a `PhysicalDesign`, a `PackageSpec`, an `AndMatrixSpec`, the device's `MacrocellSpec`s, and a `FuseMap`. It knows nothing about JEDEC syntax and nothing about any particular device, so a target it has never heard of reports the same way.
+
+```rust
+pub struct InspectReport {
+    pub device: String,
+    pub package: String,
+    pub fuse_count: u32,
+    pub macrocells: Vec<MacrocellReport>,
+    pub global_terms: Vec<GlobalTermReport>,
+    pub user_signature: Option<SignatureReport>,
+    pub security_fuse_set: bool,
+    /// Present when the design came from a file rather than an encoder.
+    pub source: Option<SourceReport>,
+}
+
+impl InspectReport {
+    pub fn new(
+        design: &PhysicalDesign,
+        package: &PackageSpec,
+        matrix: &AndMatrixSpec,
+        specs: &[MacrocellSpec],
+        fuses: &FuseMap,
+    ) -> Result<Self, ReportError>;
+
+    pub fn with_source(self, source: SourceReport) -> Self;
+    /// Additive: ORs in a lock the fuse vector cannot carry.
+    pub fn with_security_fuse(self, set: bool) -> Self;
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error>;
+}
+
+/// What the *file* said, as distinct from what the device holds.
+pub struct SourceReport {
+    pub design_specification: String,
+    pub declared_fuse_checksum: Option<u16>,
+    pub computed_fuse_checksum: u16,
+    pub transmission_checksum: Option<u16>,
+    pub notes: Vec<String>,
+    pub unmodelled_fields: Vec<String>,
+}
+
+impl SourceReport {
+    pub fn declares_a_checksum(&self) -> bool;
+    pub fn fuse_checksum_agrees(&self) -> bool;
+}
+
+pub enum ReportError {
+    PackageMismatch { design: PackageId, supplied: PackageId },
+    UnknownRow { row: ProductTermId },
+    UnknownInput { input: BoolInputId },
+    UnknownMacrocell { macrocell: MacrocellId },
+    SignatureNotWholeBytes { name: &'static str, bits: u32 },
+}
+```
+
+**`C0000` is "not computed", not a wrong answer.** JEDEC 3A grants the transmission checksum that courtesy explicitly, GALasm and WinCUPL both emit it for the fuse checksum, and §6.2's parser accepts it for that reason. Since the parser turns every *other* mismatch into an error, zero is the only declared value a reader can ever see disagreeing with the data — so a report that called it a disagreement would make every such finding a false alarm on a valid file. `declares_a_checksum` is the predicate that says so.
+
+**`with_security_fuse` is additive.** Not every device keeps the security bit inside `QF` — the ATF22V10C's is the JEDEC `G` field, with no fuse index to cite (§4.7) — so the state sometimes arrives from outside the vector. Assigning it would let a file's *silence* clear a lock the fuses reported, and a part reported readable when it is locked is the one error that costs a user the chip.
+
+**A signature region that is not a whole number of bytes is refused.** Packing would otherwise drop the remainder silently, and a region shorter than a byte produces no bytes at all — whereupon "every byte is printable" holds vacuously and the report prints an empty string for a region holding data. Bit order is MSB-first, which is *measured for the ATF22V10C* and assumed for every device; the trigger to move it into the device layer is the first target where it does not hold.
+
+**A term that can never fire is flagged, not hidden.** `Cube::canonical` preserves a contradiction deliberately (§3.9), and such a term is as unsatisfiable as an absent one — but rendered as bare text it reads exactly like a term that works. `EquationRef::never_true` says so, because the two constantly-false spellings mean different things: `a & !a` is a mistake worth reporting, an absent enable is an intent worth encoding.
+
+**Literal order within a term is the array's column order**, not pin order. It is deterministic (§13.2), which is what matters, and it is the order the silicon is in.
+
+A macrocell's pin is resolved through `MacrocellSpec::pad` and `PackageSpec::pin_of_pad`, never by casting a `MacrocellId` to a `PadId`. They are separate types because they are separate facts, and a crate that reports a device it has never heard of cannot assume they agree — the two would then disagree *within one report*, which would say a macrocell is on one pin and name its own feedback for another.
+
+**Everything is named in pins.** A `PhysicalDesign` speaks in macrocell ids, product-term rows, and `BoolInputId`s; a person holding the part has only pin numbers, so that is the translation the report exists to perform. A feedback path is named for the pin its macrocell drives — it does arrive there — with the difference recorded as a `kind` rather than spelled into the name. A literal no `LiteralSource` carries is an **error**, not a fallback to "input 9": a signal name corresponding to nothing on the part is worse than a refusal. A design whose `package` is not the one supplied is refused for the same reason, since every pin number in the report would then be confidently wrong.
+
+**A product term with no literals renders as `always`.** It is the empty AND, constantly true (§4.5), and a blank line there would show an always-enabled output as having no enable at all — the opposite of what it means. An absent output-enable term renders as `never`, which is how this device family says the pin is an input.
+
+Report structs carry plain numbers rather than the device layer's typed ids. A report is a presentation type whose JSON form is untyped, and carrying the newtypes would mean spreading `serde` across the device layer to buy nothing this layer can use.
+
 Also provide `--json`.
 
 ---
@@ -2558,7 +2651,7 @@ decpld sim design.decpld --vectors vectors.json
 decpld report design.decpld --format text
 decpld report design.decpld --format json
 
-decpld jed inspect file.jed --device ATF22V10C
+decpld jed inspect file.jed --device ATF22V10C [--package DIP24] [--json]
 decpld jed validate file.jed --strictness strict|compatible|preserve-unknown
 decpld jed canonicalize input.jed -o output.jed --style canonical|compact
 decpld jed diff a.jed b.jed
@@ -2572,6 +2665,14 @@ decpld oracle analyze-suite targets/fixtures/atf22v10
 `--strictness` selects the parser mode. It is deliberately **not** called `--mode`: §8.1.3 already gives `decpld build --mode auto|registered|complex|simple`, which is the ATF16V8 datasheet's own word for its global modes, and `jed inspect --device` will report one. Two unrelated meanings of `--mode` on one command is a collision worth spending a longer flag name to avoid.
 
 `--style` selects the writer style. Both default to the tolerant choice: `preserve-unknown` and `canonical`.
+
+`jed inspect --device` is required: a JEDEC file does not say what part it is for. `QF` narrows it — 5892 fuses is not an ATF16V8 — but fuse counts are not unique across families, so the user names the part and deCPLD checks the count against it rather than guessing from it. A file whose count is not one of the named device's is **trouble**, not a finding: the command was asked to describe that part and was handed another, so it could not do its job at all.
+
+`--package` is a **checked assertion**, never an override (§8.1). Relabelling the report to whatever was asked for would turn the flag into a way of printing pin numbers for a package the file is not for.
+
+`jed inspect` has no finding path. The parser refuses a file whose `C` field disagrees with its fuse data and accepts `C0000` as JEDEC's "not computed", so every file that reaches a report either states a true checksum or states none. A check in the command could fire only on the second case, where there is nothing to report.
+
+The code joining §6.2's parser, §4.7's device model, and §6.3's report lives in the CLI crate, above all three, because none of them may depend on the others. That placement is a **deferral, not a conclusion**: `Device` is the beginning of §8.1's target registry, and the LSP and `decpld report` will need the same seam. It moves to a library crate at the first of ATF16V8 support or a second consumer, whichever comes first.
 
 ### 8.2.1 Exit codes
 

@@ -36,6 +36,7 @@ decpld-jedec = { path = "crates/decpld-jedec" }
 decpld-logic = { path = "crates/decpld-logic" }
 decpld-device = { path = "crates/decpld-device" }
 decpld-atf22v10 = { path = "crates/decpld-atf22v10" }
+decpld-report = { path = "crates/decpld-report" }
 
 # Derived error types. Keeps the "errors identify object context" rule
 # (CLAUDE.md) cheap enough that there is no excuse for a bare String.
@@ -45,6 +46,18 @@ thiserror = "2"
 # enthal projects; SPEC.md §8 specifies a nested subcommand tree
 # that is not worth hand-rolling.
 clap = { version = "4", features = ["derive"] }
+
+# JSON output for `jed inspect --json` and `report --format json`
+# (SPEC.md §6.3, §8.2). Hand-rolling the encoder would mean hand-rolling
+# string escaping, which is a silent-corruption bug waiting to happen in
+# a project whose whole premise is not producing those.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Snapshot testing for the compiler explaining itself: diagnostics, fit
+# reports, and `dump --stage` output (CLAUDE.md). A regression in the
+# explanation is a real regression.
+insta = "1"
 
 # Property testing. The round-trip invariants in decpld-jedec are the
 # kind of claim that example tests can only sample and properties can

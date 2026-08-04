@@ -1,0 +1,116 @@
+---
+source: crates/decpld-report/tests/inspect.rs
+expression: json
+---
+{
+  "device": "SYNTH2",
+  "package": "DIP8",
+  "fuse_count": 81,
+  "macrocells": [
+    {
+      "macrocell": 0,
+      "pin": 3,
+      "mode": "registered",
+      "polarity": "active low",
+      "feedback": "pin",
+      "pad_enabled": true,
+      "output_enable": {
+        "row": 0,
+        "literals": [],
+        "text": "always",
+        "never_true": false
+      },
+      "sum": [
+        {
+          "row": 1,
+          "literals": [
+            {
+              "signal": {
+                "name": "pin1",
+                "pin": 1,
+                "kind": "input"
+              },
+              "complemented": false
+            },
+            {
+              "signal": {
+                "name": "pin2",
+                "pin": 2,
+                "kind": "input"
+              },
+              "complemented": true
+            }
+          ],
+          "text": "pin1 & !pin2",
+          "never_true": false
+        },
+        {
+          "row": 2,
+          "literals": [
+            {
+              "signal": {
+                "name": "pin4",
+                "pin": 4,
+                "kind": "feedback"
+              },
+              "complemented": false
+            }
+          ],
+          "text": "pin4",
+          "never_true": false
+        }
+      ],
+      "terms_used": 2,
+      "terms_available": 2
+    },
+    {
+      "macrocell": 1,
+      "pin": 4,
+      "mode": "combinational",
+      "polarity": "active high",
+      "feedback": "pin",
+      "pad_enabled": false,
+      "output_enable": null,
+      "sum": [],
+      "terms_used": 0,
+      "terms_available": 3
+    }
+  ],
+  "global_terms": [
+    {
+      "role": "asynchronous reset",
+      "equation": {
+        "row": 7,
+        "literals": [
+          {
+            "signal": {
+              "name": "pin1",
+              "pin": 1,
+              "kind": "input"
+            },
+            "complemented": true
+          },
+          {
+            "signal": {
+              "name": "pin3",
+              "pin": 3,
+              "kind": "feedback"
+            },
+            "complemented": false
+          }
+        ],
+        "text": "!pin1 & pin3",
+        "never_true": false
+      }
+    }
+  ],
+  "user_signature": {
+    "bytes": [
+      255,
+      255
+    ],
+    "text": null
+  },
+  "security_fuse_set": false,
+  "source": null
+}
