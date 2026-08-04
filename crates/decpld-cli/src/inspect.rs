@@ -82,14 +82,28 @@ pub struct DeviceModel {
 }
 
 impl DeviceModel {
-    /// Whether a second file describes the same footprint as this
+    /// Require a second file to describe the same footprint as this
     /// model.
+    ///
+    /// Not merely "a footprint this device has": the ATF22V10C has
+    /// three, and fuse *N* of a 5828-fuse PAL-mode file is not fuse *N*
+    /// of a 5892-fuse GAL-mode one. Comparing across them yields no
+    /// comparable fuse at all, which a reader would see as "no fuse
+    /// changed" — a wrong answer rather than a refusal.
     ///
     /// # Errors
     ///
-    /// If the count is not one this device has at all.
-    pub fn check_fuse_count(&self, fuse_count: u32) -> Result<Footprint, InspectError> {
-        Ok(Footprint::from_fuse_count(fuse_count)?)
+    /// If the count is not one this device has, or is a different
+    /// footprint from this model's.
+    pub fn require_same_footprint(&self, fuse_count: u32) -> Result<(), InspectError> {
+        let footprint = Footprint::from_fuse_count(fuse_count)?;
+        if footprint != self.footprint {
+            return Err(InspectError::FootprintMismatch {
+                expected: self.footprint,
+                found: footprint,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -115,6 +129,13 @@ pub enum InspectError {
          the assertion is checked, never applied"
     )]
     PackageMismatch { package_in_file: &'static str, requested: String },
+    #[error(
+        "one file has {} fuses ({expected}) and the other {} ({found}); fuse N of one is not \
+         fuse N of the other, so there is nothing to compare",
+        expected.fuse_count(),
+        found.fuse_count()
+    )]
+    FootprintMismatch { expected: Footprint, found: Footprint },
 }
 
 /// Describe a parsed JEDEC file as a device.

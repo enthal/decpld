@@ -74,6 +74,22 @@ pub enum Footprint {
     PowerDown,
 }
 
+impl std::fmt::Display for Footprint {
+    /// The name a user would recognise, not the Rust variant.
+    ///
+    /// `{:?}` renders `PowerDown`, which appears in no datasheet and in
+    /// no WinCUPL menu; a report naming a footprint has to name the one
+    /// the reader's tools use.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Footprint::Pal => "PAL mode",
+            Footprint::Gal => "GAL mode",
+            Footprint::PowerDown => "power-down mode",
+        };
+        f.write_str(name)
+    }
+}
+
 impl Footprint {
     /// Every footprint, ascending by fuse count.
     pub const ALL: [Footprint; 3] = [Footprint::Pal, Footprint::Gal, Footprint::PowerDown];

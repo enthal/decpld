@@ -555,7 +555,7 @@ fn oracle_diff_explains_what_each_changed_fuse_controls() {
     // And the enable delta names the pin, not just the fuse.
     assert!(text.contains("output-enable term in product term 1: literal pin 4"), "{text}");
     // The header is summarised, never echoed.
-    assert!(text.contains("design specification: 1 line(s) differ"), "{text}");
+    assert!(text.contains("design specification: 1 of 1 line(s) differ"), "{text}");
 }
 
 #[test]

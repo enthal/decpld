@@ -368,3 +368,70 @@ fn a_description_names_the_resource_the_signal_and_the_sense() {
     assert_eq!(meaning(ARRAY + CONFIG + SIGNATURE).to_string(), "the security fuse");
     assert_eq!(meaning(999).to_string(), "fuse 999, which this device does not have");
 }
+
+#[test]
+fn a_programmable_fuse_no_matrix_cell_or_field_claims_is_other() {
+    // The real case is the ATF22V10C's power-down fuse: programmable,
+    // inside `QF`, and claimed by no matrix cell and no configuration
+    // field. It must classify as something rather than fall through to
+    // `Unknown`, which is reserved for addresses outside the model.
+    let regions = FuseRegions::new(
+        ARRAY + CONFIG + 1,
+        vec![
+            FuseRegion {
+                name: "array",
+                range: 0..ARRAY,
+                erased_value: true,
+                mutability: FuseMutability::Programmable,
+            },
+            FuseRegion {
+                name: "architecture",
+                range: ARRAY..ARRAY + CONFIG,
+                erased_value: true,
+                mutability: FuseMutability::Programmable,
+            },
+            FuseRegion {
+                name: "power-down",
+                range: ARRAY + CONFIG..ARRAY + CONFIG + 1,
+                erased_value: true,
+                mutability: FuseMutability::Programmable,
+            },
+        ],
+    )
+    .expect("a valid layout");
+
+    let meaning = classify_fuse(FuseId(ARRAY + CONFIG), &matrix(), &specs(), &regions);
+    assert_eq!(
+        meaning,
+        FuseMeaning::Other { region: "power-down", mutability: FuseMutability::Programmable }
+    );
+    assert_eq!(meaning.category(), "other");
+    assert_eq!(meaning.to_string(), "region `power-down`");
+}
+
+#[test]
+fn a_fuse_claimed_by_both_a_matrix_cell_and_a_field_reads_as_the_matrix_cell() {
+    // The ordering `classify_fuse` documents, pinned. A region can only
+    // say "programmable"; the matrix knows which literal of which
+    // product term a cell carries. Nothing forbids a target from
+    // pointing a configuration field at an array fuse, and the finer
+    // answer has to win — a device model that did so is broken, but a
+    // classifier that reported "polarity bit" for an array cell would
+    // hide which.
+    let mut specs = specs();
+    specs[0].polarity_field = Some(
+        ConfigField::new(
+            ConfigFieldId(99),
+            "polarity",
+            vec![FuseId(8)], // row 1, column 2 — an array cell
+            [(OutputPolarity::ActiveHigh, vec![true]), (OutputPolarity::ActiveLow, vec![false])],
+        )
+        .expect("a valid field"),
+    );
+
+    let meaning = classify_fuse(FuseId(8), &matrix(), &specs, &regions());
+    assert!(
+        matches!(meaning, FuseMeaning::MatrixCell { .. }),
+        "the matrix is consulted first, got {meaning:?}"
+    );
+}

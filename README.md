@@ -187,8 +187,10 @@ That distinction is what makes the command worth having over `diff(1)`, and it i
 
 ```console
 $ decpld oracle diff in2.jed oe-var.jed --device ATF22V10C
-device: ATF22V10C (Gal footprint)
-design specification: 2 line(s) differ (not shown: banner, timestamp, serial)
+--- in2.jed
++++ oe-var.jed
+device: ATF22V10C (GAL mode)
+design specification: 1 of 12 line(s) differ (text not shown: banner, timestamp, serial)
 
 1 fuse(s) changed:
       1  matrix-output-enable
@@ -198,6 +200,8 @@ matrix-output-enable:
 ```
 
 "Fuse 52 changed" is not a finding; that sentence is. The classification lives in the device layer and consults only what a target already declares — its AND matrix, its macrocells, its fuse regions — so every device gets it without a second table to drift from the first.
+
+No free text is echoed. WinCUPL's banner carries the installation's serial number, and a `.pld` author can put anything in a note, so every text field is counted rather than quoted — this output is what gets pasted into an evidence file.
 
 `decpld jed inspect` reads an ATF22V10C fuse map back as macrocells and equations — a file this compiler wrote, or one WinCUPL, Galette, or a programmer's readback produced:
 

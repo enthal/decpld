@@ -1,0 +1,20 @@
+---
+source: crates/decpld-cli/src/oracle.rs
+expression: "render(&delta, \"before.jed\", \"after.jed\")"
+---
+--- before.jed
++++ after.jed
+device: ATF22V10C (GAL mode)
+
+4 fuse(s) changed:
+      2  matrix-data
+      1  matrix-output-enable
+      1  mode
+
+matrix-data:
+  fuse 92 0 -> 1   macrocell 9 data term in product term 2: literal pin 2
+  fuse 100 1 -> 0   macrocell 9 data term in product term 2: literal pin 4
+matrix-output-enable:
+  fuse 52 1 -> 0   macrocell 9 output-enable term in product term 1: literal pin 3
+mode:
+  fuse 5809 1 -> 0   macrocell 9 mode bit 0

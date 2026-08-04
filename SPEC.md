@@ -2526,6 +2526,12 @@ Deltas are **grouped by category**, with a count per category ahead of the detai
 
 Exit codes follow §8.2.1 as `jed diff` does: a difference is a **finding**, an unreadable or foreign file is **trouble**. An oracle session is scripted over dozens of experiments, so "these files differ" has to be distinguishable from "I could not read that file".
 
+**Two files must be the same footprint, not merely both this device.** The ATF22V10C has three fuse counts (§4.7), and fuse *N* of a 5828-fuse PAL-mode file is not fuse *N* of a 5892-fuse GAL-mode one. Comparing across them leaves nothing comparable, which a reader would see as "no fuse changed" — a wrong answer where a refusal was available.
+
+**No free-text field is printed, only counted.** Not the design specification, not notes, not the bodies of unmodelled fields. A `.pld` author can put anything in an `N` note and an unmodelled field is reproduced identifier *and* body, so restricting the rule to the header would leave two other paths open. Line counts are reported as "*n* of *m* differ" or "*m* lines → *n*": a positional comparison counts every line after an inserted one as changed, and WinCUPL headers routinely differ by a present-or-absent line.
+
+`counts_by_category` is a **method**, not a field. Stored beside the deltas the two could disagree, and `render` walks the categories to group its output — so a stale map would drop a category's deltas from the body while the header still counted them.
+
 A mapping becomes verified only when multiple independent fixtures agree, invariants hold, encode/decode round-trips, and preferably hardware testing succeeds.
 
 ## 7.6 Metadata parsing
@@ -2702,6 +2708,7 @@ decpld jed canonicalize input.jed -o output.jed --style canonical|compact
 decpld jed diff a.jed b.jed
 
 decpld oracle env
+decpld oracle diff before.jed after.jed --device ATF22V10C
 decpld oracle compile fixture.pld --out-dir result/
 decpld oracle generate-suite --device ATF22V10C
 decpld oracle analyze-suite targets/fixtures/atf22v10
@@ -2721,7 +2728,7 @@ The code joining §6.2's parser, §4.7's device model, and §6.3's report lives 
 
 ### 8.2.1 Exit codes
 
-The `jed` commands follow `diff(1)`, so they compose into scripts:
+The `jed` commands and `oracle diff` follow `diff(1)`, so they compose into scripts:
 
 | Code | Meaning |
 | --- | --- |
