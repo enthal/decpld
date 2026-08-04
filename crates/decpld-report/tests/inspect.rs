@@ -346,3 +346,52 @@ fn the_json_report_carries_every_field_the_text_one_does() {
     let json = report().to_json().expect("serialisable");
     insta::assert_snapshot!(json);
 }
+
+fn source_report() -> decpld_report::SourceReport {
+    decpld_report::SourceReport {
+        design_specification: " a two-macrocell part ".to_owned(),
+        declared_fuse_checksum: Some(0x1234),
+        computed_fuse_checksum: 0x1234,
+        transmission_checksum: Some(0xABCD),
+        notes: vec!["written by hand".to_owned()],
+        unmodelled_fields: vec!["QP".to_owned(), "J".to_owned()],
+    }
+}
+
+#[test]
+fn a_checksum_a_file_declared_is_reported_beside_the_one_its_data_produces() {
+    // A `C` field can disagree with the fuse data it claims to
+    // describe. Reporting only one of the two would let a corrupt file
+    // look correct, whichever one was chosen.
+    let mut source = source_report();
+    assert!(source.fuse_checksum_agrees());
+
+    source.declared_fuse_checksum = Some(0x0000);
+    assert!(!source.fuse_checksum_agrees());
+
+    // A file that declared none makes no claim to be wrong about.
+    source.declared_fuse_checksum = None;
+    assert!(source.fuse_checksum_agrees());
+}
+
+#[test]
+fn a_readback_lock_outside_the_fuse_vector_is_still_reported() {
+    // The ATF22V10C's security bit is the JEDEC `G` field and has no
+    // fuse index inside `QF` (SPEC.md §4.7). A report that looked only
+    // for a security region would call a locked part clear.
+    let report = report();
+    assert!(!report.security_fuse_set, "this fixture's own region is clear");
+    assert!(report.with_security_fuse(true).security_fuse_set);
+}
+
+#[test]
+fn the_text_report_shows_what_the_file_claimed() {
+    insta::assert_snapshot!(report().with_source(source_report()).to_string());
+}
+
+#[test]
+fn a_disagreeing_checksum_is_called_out_in_the_text_report() {
+    let mut source = source_report();
+    source.declared_fuse_checksum = Some(0x0000);
+    insta::assert_snapshot!(report().with_source(source).to_string());
+}

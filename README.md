@@ -133,7 +133,7 @@ The device layer is a typed Rust specification with an `ArchitectureKind` seam, 
 | Milestone | What it delivers |
 | --- | --- |
 | M0 | JEDEC foundation — parse, validate, canonicalize, checksum ✅ |
-| M1 | ATF22V10 decoder/encoder with round-trip invariants |
+| M1 | ATF22V10 decoder/encoder with round-trip invariants — in progress |
 | M2 | Minimal combinational language — working hardware |
 | M3 | Registered logic — counters and shift registers on real parts |
 | M4 | Modules, parameters, `if` / `match`, concatenation |
@@ -183,6 +183,27 @@ fuse 3: 0 -> 1
 
 That distinction is what makes the command worth having over `diff(1)`, and it is the foundation the device work builds on: reverse-engineering a fuse map means changing one thing and seeing which *fuses* moved.
 
+`decpld jed inspect` reads an ATF22V10C fuse map back as macrocells and equations — a file this compiler wrote, or one WinCUPL, Galette, or a programmer's readback produced:
+
+```console
+$ decpld jed inspect design.jed --device ATF22V10C
+ATF22V10C  DIP24  5892 fuses
+
+macrocell 9 -> pin 23
+  mode      registered
+  polarity  active low
+  feedback  pin
+  enable    always
+  terms     2 of 8
+      pin2 & !pin3
+    | pin11
+
+signature  ff ff ff ff ff ff ff ff (not printable)
+security   clear
+```
+
+Everything is named in **pins**, because that is the only vocabulary the file and the person holding the part share. A product term with no literals reads as `always` — it is the empty AND, constantly true, and this is the fact about GAL-family parts that is easiest to get backwards. A macrocell with no output-enable term reads as `never`, which is how the device says its pin is an input. `--json` emits the same report for scripts; `--package` is a *checked assertion*, never an override.
+
 Exit codes follow `diff(1)` so the commands compose into scripts: **0** nothing to report, **1** a finding (the file is invalid, or the two files differ), **2** trouble (unreadable file, bad usage). "These files differ" and "I could not read that file" are different answers and must not share a code.
 
 Rust **1.95+** is required and pinned in [rust-toolchain.toml](rust-toolchain.toml); `rustup` installs it automatically on the first `cargo` invocation.
@@ -211,7 +232,7 @@ The hook runs `fmt` + `clippy` + the markdown lint. It deliberately does **not**
 
 WinCUPL has one role here: an independent witness for reverse-engineering device fuse maps. Controlled differential experiments — compile a minimal design, change exactly one thing, diff the resulting fuse *vectors* rather than the file text — reveal what each fuse controls. Those findings are then triangulated against the datasheets, against open-source implementations ([Galette](https://github.com/simon-frankau/galette), [GALasm](https://github.com/daveho/GALasm)), against encode/decode invariants, and finally against physical hardware.
 
-WinCUPL is not assumed to be correct, and it is never required to compile anything. The oracle harness lives under `tools/wincupl/` and is developer-only; no proprietary Atmel files are redistributed from this repository.
+WinCUPL is not assumed to be correct, and it is never required to compile anything. The oracle harness lives under `targets/experiments/` and is developer-only; no proprietary Atmel files are redistributed from this repository.
 
 ## License
 

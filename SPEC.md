@@ -2617,7 +2617,7 @@ decpld sim design.decpld --vectors vectors.json
 decpld report design.decpld --format text
 decpld report design.decpld --format json
 
-decpld jed inspect file.jed --device ATF22V10C
+decpld jed inspect file.jed --device ATF22V10C [--package DIP24] [--json]
 decpld jed validate file.jed --strictness strict|compatible|preserve-unknown
 decpld jed canonicalize input.jed -o output.jed --style canonical|compact
 decpld jed diff a.jed b.jed
@@ -2631,6 +2631,12 @@ decpld oracle analyze-suite targets/fixtures/atf22v10
 `--strictness` selects the parser mode. It is deliberately **not** called `--mode`: §8.1.3 already gives `decpld build --mode auto|registered|complex|simple`, which is the ATF16V8 datasheet's own word for its global modes, and `jed inspect --device` will report one. Two unrelated meanings of `--mode` on one command is a collision worth spending a longer flag name to avoid.
 
 `--style` selects the writer style. Both default to the tolerant choice: `preserve-unknown` and `canonical`.
+
+`jed inspect --device` is required: a JEDEC file does not say what part it is for. `QF` narrows it — 5892 fuses is not an ATF16V8 — but fuse counts are not unique across families, so the user names the part and deCPLD checks the count against it rather than guessing from it. A file whose count is not one of the named device's is **trouble**, not a finding: the command was asked to describe that part and was handed another, so it could not do its job at all.
+
+`--package` is a **checked assertion**, never an override (§8.1). Relabelling the report to whatever was asked for would turn the flag into a way of printing pin numbers for a package the file is not for.
+
+`jed inspect` has no finding path. The parser already refuses a file whose `C` field disagrees with its fuse data, so every file it can describe has had its checksum checked; a second check in the command could not fire and would imply a gate that is not its.
 
 ### 8.2.1 Exit codes
 

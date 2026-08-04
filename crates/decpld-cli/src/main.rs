@@ -9,6 +9,7 @@
 //! what comes back. Anything with a decision in it belongs in a crate
 //! where it can be tested without spawning a process.
 
+mod inspect;
 mod render;
 
 use std::path::{Path, PathBuf};
@@ -17,6 +18,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use decpld_diagnostics::FileId;
 use decpld_jedec::{JedecDiff, ParserMode, WriterStyle, parse_with_mode, write};
+
+use crate::inspect::Device;
 
 #[derive(Parser)]
 #[command(
@@ -69,6 +72,38 @@ enum JedCommand {
 
     /// Compare two JEDEC files by fuse vector rather than by text
     Diff { before: PathBuf, after: PathBuf },
+
+    /// Read a JEDEC file back as macrocells and equations
+    Inspect {
+        file: PathBuf,
+        /// Which part the file is for
+        ///
+        /// A JEDEC file does not say. `QF` narrows it, but several
+        /// parts share a fuse count, so the device is named and the
+        /// count is checked against it rather than guessed from it.
+        #[arg(long, value_enum)]
+        device: DeviceArg,
+        /// Assert the package. Checked, never applied (SPEC.md §8.2).
+        #[arg(long)]
+        package: Option<String>,
+        /// Emit the report as JSON instead of text
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum DeviceArg {
+    #[value(name = "ATF22V10C", alias = "atf22v10c")]
+    Atf22v10c,
+}
+
+impl From<DeviceArg> for Device {
+    fn from(device: DeviceArg) -> Self {
+        match device {
+            DeviceArg::Atf22v10c => Self::Atf22v10c,
+        }
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -130,6 +165,9 @@ fn main() -> ExitCode {
             canonicalize(&file, output.as_deref(), style.into())
         }
         Command::Jed(JedCommand::Diff { before, after }) => diff(&before, &after),
+        Command::Jed(JedCommand::Inspect { file, device, package, json }) => {
+            inspect_command(&file, device.into(), package.as_deref(), json)
+        }
     };
 
     match result {
@@ -241,6 +279,44 @@ fn diff(before: &Path, after: &Path) -> Result<u8, Failure> {
 
     print!("{}", render_diff(&delta, &left_name, &right_name));
     Ok(FINDINGS)
+}
+
+fn inspect_command(
+    path: &Path,
+    device: Device,
+    package: Option<&str>,
+    json: bool,
+) -> Result<u8, Failure> {
+    let source = read(path)?;
+    let name = path.display().to_string();
+
+    let parsed =
+        parse_with_mode(&source, FileId(0), ParserMode::PreserveUnknown).map_err(|bundle| {
+            eprint!("{}", render::bundle(&bundle, &name, &source));
+            Failure::trouble(format!("{name}: not a valid JEDEC file"))
+        })?;
+    eprint!("{}", render::bundle(&parsed.diagnostics, &name, &source));
+
+    // A file this device cannot be is *trouble*, not a finding: the
+    // command was asked to describe an ATF22V10C and was handed
+    // something else, so it could not do its job at all.
+    let report = inspect::inspect(&parsed.file, device, package)
+        .map_err(|e| Failure::trouble(format!("{name}: {e}")))?;
+
+    if json {
+        let text = report
+            .to_json()
+            .map_err(|e| Failure::trouble(format!("{name}: could not serialise report: {e}")))?;
+        println!("{text}");
+    } else {
+        print!("{report}");
+    }
+
+    // No `FINDINGS` path. The parser already refuses a file whose `C`
+    // field disagrees with its fuse data (E3021), so a report only ever
+    // exists for a file whose checksum is true; a second check here
+    // could not fire and would imply a gate that is not this command's.
+    Ok(OK)
 }
 
 /// One-line summary of a file that parsed. Pure, so it is testable

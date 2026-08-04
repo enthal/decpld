@@ -107,5 +107,6 @@ expression: json
     ],
     "text": null
   },
-  "security_fuse_set": false
+  "security_fuse_set": false,
+  "source": null
 }

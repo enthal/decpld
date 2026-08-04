@@ -18,7 +18,15 @@ path = "src/main.rs"
 [dependencies]
 decpld-diagnostics.workspace = true
 decpld-jedec.workspace = true
+decpld-device.workspace = true
+decpld-atf22v10.workspace = true
+decpld-report.workspace = true
+thiserror.workspace = true
 clap.workspace = true
+
+[dev-dependencies]
+decpld-logic.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

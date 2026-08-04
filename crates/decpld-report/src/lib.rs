@@ -121,6 +121,33 @@ pub struct SignatureReport {
     pub text: Option<String>,
 }
 
+/// What the *file* said, as distinct from what the device holds.
+///
+/// SPEC.md §6.3 asks for checksums, and they are facts about a
+/// transmission rather than about silicon — a `C` field can disagree
+/// with the fuse data it claims to describe, and saying so is the point.
+/// Kept as plain numbers so this crate still knows no JEDEC syntax.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SourceReport {
+    pub design_specification: String,
+    /// The `C` field as written, whether or not it was true.
+    pub declared_fuse_checksum: Option<u16>,
+    /// What the fuse data actually produces.
+    pub computed_fuse_checksum: u16,
+    pub transmission_checksum: Option<u16>,
+    pub notes: Vec<String>,
+    /// Identifiers of fields the reader retained but does not model.
+    pub unmodelled_fields: Vec<String>,
+}
+
+impl SourceReport {
+    /// Whether the file's own checksum claim is true.
+    #[must_use]
+    pub fn fuse_checksum_agrees(&self) -> bool {
+        self.declared_fuse_checksum.is_none_or(|declared| declared == self.computed_fuse_checksum)
+    }
+}
+
 /// Everything `jed inspect` reports about one part. SPEC.md §6.3.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct InspectReport {
@@ -131,6 +158,9 @@ pub struct InspectReport {
     pub global_terms: Vec<GlobalTermReport>,
     pub user_signature: Option<SignatureReport>,
     pub security_fuse_set: bool,
+    /// Present when the design came from a file rather than from a
+    /// compiler's own encoder.
+    pub source: Option<SourceReport>,
 }
 
 impl InspectReport {
@@ -211,7 +241,29 @@ impl InspectReport {
                 .security_fuse()
                 .and_then(|fuse| fuses.get(fuse))
                 .unwrap_or(false),
+            source: None,
         })
+    }
+
+    /// Record what the file this design was read from said.
+    #[must_use]
+    pub fn with_source(mut self, source: SourceReport) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    /// Record a readback lock the device model cannot see.
+    ///
+    /// Not every device holds the security bit inside its fuse count —
+    /// the ATF22V10C's is the JEDEC `G` field, and there is no fuse
+    /// index to cite for it (§4.7). Where the state arrives from
+    /// outside the fuse vector it is recorded here, so a locked part is
+    /// reported as locked rather than as clear because the region a
+    /// generic reader looked for does not exist.
+    #[must_use]
+    pub fn with_security_fuse(mut self, set: bool) -> Self {
+        self.security_fuse_set = set;
+        self
     }
 
     /// The same report as JSON.
@@ -418,6 +470,36 @@ impl fmt::Display for InspectReport {
             }
             None => writeln!(f, "signature  this device has none")?,
         }
-        writeln!(f, "security   {}", if self.security_fuse_set { "SET" } else { "clear" })
+        writeln!(f, "security   {}", if self.security_fuse_set { "SET" } else { "clear" })?;
+
+        if let Some(source) = &self.source {
+            writeln!(f, "\nfile")?;
+            if !source.design_specification.trim().is_empty() {
+                writeln!(f, "  header    {}", source.design_specification.trim())?;
+            }
+            match source.declared_fuse_checksum {
+                // A `C` field disagreeing with the fuse data it claims
+                // to describe is the whole reason the declared and
+                // computed values are reported separately.
+                Some(declared) if !source.fuse_checksum_agrees() => writeln!(
+                    f,
+                    "  checksum  {declared:04X} declared, {:04X} computed — DISAGREE",
+                    source.computed_fuse_checksum
+                )?,
+                Some(declared) => writeln!(f, "  checksum  {declared:04X}")?,
+                None => writeln!(
+                    f,
+                    "  checksum  none declared, {:04X} computed",
+                    source.computed_fuse_checksum
+                )?,
+            }
+            for note in &source.notes {
+                writeln!(f, "  note      {note}")?;
+            }
+            if !source.unmodelled_fields.is_empty() {
+                writeln!(f, "  retained  {}", source.unmodelled_fields.join(" "))?;
+            }
+        }
+        Ok(())
     }
 }
