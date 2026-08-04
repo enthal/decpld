@@ -41,6 +41,15 @@ Thumbs.db
 /.claude/settings*.json
 /.claude/scheduled_tasks.lock
 
+# Third-party reference documents. `targets/evidence/references.toml`
+# records each one's URL and sha256; the documents are copyrighted and
+# are re-fetched on demand by `targets/evidence/verify-references.sh`,
+# never committed. The manifest, README, and script are tracked.
+/targets/evidence/*
+!/targets/evidence/README.md
+!/targets/evidence/references.toml
+!/targets/evidence/verify-references.sh
+
 # Logs and scratch
 *.log
 scratch/

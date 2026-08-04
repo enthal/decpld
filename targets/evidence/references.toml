@@ -1,0 +1,143 @@
+# Primary references for deCPLD device and format knowledge.
+#
+# SPEC.md §5.33 requires that exact revisions and hashes live here. The
+# `sha256` IS the identity of a document: vendors reissue PDFs at the
+# same URL without changing any visible revision string, so a citation
+# that names only a title and a URL cannot be checked later. A citation
+# that names a hash can.
+#
+# The documents themselves are NOT committed. They are third-party and
+# in some cases proprietary; `.gitignore` excludes them from this
+# directory. Re-fetch and check them with:
+#
+#     targets/evidence/verify-references.sh
+#
+# Source comments in target definitions cite a reference by its `id`
+# plus a locator, e.g.:
+#
+#     // Evidence: atf22v10c-datasheet §"Logic Diagram", macrocell 0 row range.
+#     // Level: DifferentiallyVerified (targets/fixtures/atf22v10/oe-baseline).
+
+schema_version = 1
+
+[[reference]]
+id = "jedec-3a"
+title = "JEDEC Standard No. 3A — Data Transfer Format"
+publisher = "JEDEC / Data I/O (historical text, Data I/O-specific implementation)"
+url = "https://k1.spdns.de/Develop/Projects/GalAsm/info/JEDEC%20File%20Standard%203A.txt"
+media_type = "text/plain"
+sha256 = "9207f92b8a23453998cf8b9d89751e6c61aa1bf74df2680510a2364e7e6403af"
+bytes = 28332
+retrieved = "2026-08-04"
+revision = "3A"
+authoritative_for = [
+  "STX/ETX transmission framing",
+  "field syntax and the identifier table (N, QF, QP, QV, F, L, C, X, V, P, G, R/S/T, A)",
+  "transmission checksum algorithm",
+  "fuse checksum algorithm and 8-bit word packing",
+  "L-field override semantics for patched files",
+]
+notes = """
+Contains worked numeric examples for both checksums. Those examples are \
+reproduced verbatim as golden tests in decpld-jedec, which is why the \
+algorithms did not have to be taken on trust from any implementation.
+
+Known erratum: the text says both checksums are computed "modulo 65,535". \
+The worked examples are consistent with ordinary 16-bit wraparound \
+(modulo 65,536), and every extant implementation uses 65,536. deCPLD \
+implements 65,536 and records the discrepancy at the call site.\
+"""
+
+[[reference]]
+id = "atf22v10c-datasheet"
+title = "ATF22V10C(Q) High-performance Electrically-erasable PLD"
+publisher = "Microchip Technology (formerly Atmel)"
+url = "https://ww1.microchip.com/downloads/en/DeviceDoc/doc0735.pdf"
+media_type = "application/pdf"
+sha256 = "a32d9ffc9200e8bdac659e9e01358b2e915290e835b7c3535f09cc8d1307911e"
+bytes = 1957410
+retrieved = "2026-08-04"
+revision = "not present in extractable PDF metadata; the sha256 is the identity"
+authoritative_for = [
+  "ATF22V10C architecture and logic diagram",
+  "DIP-24 pinout and pin roles",
+  "macrocell structure and per-macrocell product-term allocation",
+  "register behavior, global clock, reset/preset resources",
+  "signature and security fuse behavior",
+]
+
+[[reference]]
+id = "atf16v8b-datasheet"
+title = "ATF16V8B / ATF16V8BQ / ATF16V8BQL Electrically-erasable PLD"
+publisher = "Microchip Technology (formerly Atmel)"
+url = "https://ww1.microchip.com/downloads/en/DeviceDoc/Atmel-0364-PLD-ATF16V8B-8BQ-8BQL-Datasheet.pdf"
+media_type = "application/pdf"
+sha256 = "b3db1197888cc176d6d1a568b7d3a109f5da2e6451081a14ede7db6fc4ef7cec"
+bytes = 2135094
+retrieved = "2026-08-04"
+revision = "Rev C (from embedded document string)"
+authoritative_for = [
+  "ATF16V8B architecture and DIP-20 pinout",
+  "registered, complex, and simple global modes",
+  "per-mode pin 1 / pin 11 roles and feedback restrictions",
+  "per-mode product-term and OE availability",
+  "compiler device mnemonics (G16V8MS / G16V8MA / G16V8AS)",
+]
+
+[[reference]]
+id = "wincupl-users-manual"
+title = "WinCUPL User's Manual"
+publisher = "Atmel"
+url = "https://ww1.microchip.com/downloads/en/DeviceDoc/doc0737.pdf"
+media_type = "application/pdf"
+sha256 = "3b191fb213c7c1a5d360f596e2449426e518729130e2011dbc3efbe8492bf03f"
+bytes = 358070
+retrieved = "2026-08-04"
+revision = "not present in extractable PDF metadata; the sha256 is the identity"
+authoritative_for = [
+  "CUPL language extensions as implemented by WinCUPL",
+  "compiler behavior and output files",
+]
+notes = "Oracle tooling only. Never a normative source for deCPLD language semantics."
+
+[[reference]]
+id = "cupl-reference-guide"
+title = "CUPL Programmer's Reference Guide"
+publisher = "Logical Devices (copy hosted by USC EE459)"
+url = "https://ece-classes.usc.edu/ee459/library/documents/CUPL_Reference.pdf"
+media_type = "application/pdf"
+sha256 = "766dc745494a6f7afa052d6f51379e41a4ee3d978ce3dc866b55299b373e9a6f"
+bytes = 1965334
+retrieved = "2026-08-04"
+revision = "PDF CreationDate 2012-10-23"
+authoritative_for = [
+  "CUPL syntax and operators",
+  "cupl.exe command-line flags",
+  "register extensions (.D, .CK, .OE)",
+  "minimization levels and output report formats",
+]
+notes = "Oracle tooling only, as above."
+
+# Open-source cross-checks. These are read as independent implementations,
+# not as authorities: agreement raises confidence, disagreement triggers a
+# differential experiment. Pinned by commit when a specific claim is cited.
+[[reference]]
+id = "galette"
+title = "Galette — a GAL assembler in Rust"
+publisher = "Simon Frankau"
+url = "https://github.com/simon-frankau/galette"
+media_type = "text/x-source"
+retrieved = "2026-08-04"
+authoritative_for = ["independent cross-check of GAL16V8 / GAL22V10 fuse layout and JEDEC output"]
+notes = "Cite a specific commit SHA and file path when used as evidence for a mapping."
+
+[[reference]]
+id = "galasm"
+title = "GALasm — GAL assembler (device maps and JEDEC/checksum implementation)"
+publisher = "Alessandro Zummo / Dave Hovemeyer (forks)"
+url = "https://github.com/daveho/GALasm"
+mirror_url = "https://github.com/dwery/galasm"
+media_type = "text/x-source"
+retrieved = "2026-08-04"
+authoritative_for = ["independent cross-check of device fuse maps and JEDEC checksum implementation"]
+notes = "Cite a specific commit SHA and file path when used as evidence for a mapping."
