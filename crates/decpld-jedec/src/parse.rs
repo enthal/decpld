@@ -18,6 +18,37 @@ use decpld_diagnostics::{Diagnostic, DiagnosticBundle, FileId, Label, Span, Text
 const STX: u8 = 0x02;
 const ETX: u8 = 0x03;
 
+/// How tolerant the parser is of what it finds. SPEC.md §5.6.
+///
+/// The three modes differ in exactly one dimension — what happens to a
+/// field deCPLD does not model — because that is the only decision where
+/// reasonable callers genuinely disagree. A validator wants to be told;
+/// a rewriter must not lose anything; a converter may not care.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ParserMode {
+    /// Every field must be one JEDEC 3A defines, and the transmission
+    /// checksum must be present. For asking "is this file actually
+    /// conformant?", which is a different question from "can I read it?".
+    Strict,
+
+    /// Accept what real tools emit. Fields deCPLD does not model are
+    /// **discarded**, with a warning naming each one.
+    ///
+    /// Use only when the output is a fresh artifact rather than a
+    /// rewrite of the input — discarding a device's test vectors is
+    /// silent data loss if anyone expected them to survive.
+    Compatible,
+
+    /// As `Compatible`, but unmodelled fields are **retained verbatim**
+    /// so the file can be written back without losing anything.
+    ///
+    /// The default, because "no silent data loss" beats tidiness, and
+    /// because `decpld jed canonicalize` would otherwise quietly delete
+    /// the test vectors of every file it touched.
+    #[default]
+    PreserveUnknown,
+}
+
 /// A successful parse, possibly with warnings.
 #[derive(Clone, Debug)]
 pub struct Parsed {
@@ -43,6 +74,15 @@ struct RawField<'t> {
 /// trusted. Parsing continues past recoverable problems so that one run
 /// reports as much as possible rather than one error at a time.
 pub fn parse(text: &str, file: FileId) -> Result<Parsed, DiagnosticBundle> {
+    parse_with_mode(text, file, ParserMode::default())
+}
+
+/// Parse `text` under an explicit [`ParserMode`].
+pub fn parse_with_mode(
+    text: &str,
+    file: FileId,
+    mode: ParserMode,
+) -> Result<Parsed, DiagnosticBundle> {
     let mut diagnostics = DiagnosticBundle::new();
     let bytes = text.as_bytes();
 
@@ -233,11 +273,41 @@ pub fn parse(text: &str, file: FileId) -> Result<Parsed, DiagnosticBundle> {
                     .with_label(Label::primary(at(field.span), "expected `G0*` or `G1*`")),
                 ),
             },
-            _ => unknown_fields.push(JedecField {
-                identifier: field.identifier.to_owned(),
-                body: field.body.to_owned(),
-                span: at(field.span),
-            }),
+            other => {
+                let standard = is_standard_identifier(other);
+                if !standard {
+                    let message = format!("`{other}` is not a JEDEC 3A field identifier");
+                    let diagnostic = if mode == ParserMode::Strict {
+                        Diagnostic::error(codes::UNKNOWN_FIELD, message)
+                    } else {
+                        Diagnostic::warning(codes::UNKNOWN_FIELD, message)
+                    };
+                    diagnostics.push(
+                        diagnostic.with_label(Label::primary(at(field.span), "unrecognised field")),
+                    );
+                }
+
+                match mode {
+                    // Discarding is a choice, so it is announced. A
+                    // field that vanished without a word would be
+                    // indistinguishable from one that was never there.
+                    ParserMode::Compatible => diagnostics.push(
+                        Diagnostic::warning(
+                            codes::FIELD_DISCARDED,
+                            format!("`{other}` field discarded: deCPLD does not model it"),
+                        )
+                        .with_label(Label::primary(at(field.span), "dropped"))
+                        .with_note("parse in preserve-unknown mode to retain it"),
+                    ),
+                    ParserMode::Strict | ParserMode::PreserveUnknown => {
+                        unknown_fields.push(JedecField {
+                            identifier: other.to_owned(),
+                            body: field.body.to_owned(),
+                            span: at(field.span),
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -263,6 +333,19 @@ pub fn parse(text: &str, file: FileId) -> Result<Parsed, DiagnosticBundle> {
     let mut transmission = None;
     let trailer = &text[etx + 1..];
     let digits: String = trailer.chars().take_while(char::is_ascii_hexdigit).collect();
+    if digits.len() < 4 && mode == ParserMode::Strict {
+        // `<format> ::= <STX> {<field>} <ETX> <xmit checksum>` — the
+        // checksum is part of the grammar. Files stored on disk rather
+        // than sent down a serial line routinely omit it, so only strict
+        // mode insists.
+        diagnostics.push(
+            Diagnostic::error(
+                codes::MISSING_TRANSMISSION_CHECKSUM,
+                "no transmission checksum after ETX",
+            )
+            .with_note("JEDEC 3A requires four hex digits after ETX; 0000 disables the check"),
+        );
+    }
     if digits.len() >= 4
         && let Some(declared) = parse_hex16(&digits[..4])
     {
@@ -398,6 +481,20 @@ const TWO_LETTER_IDENTIFIERS: [&str; 3] = ["QF", "QP", "QV"];
 const ONE_LETTER_IDENTIFIERS: [char; 12] =
     ['N', 'F', 'L', 'C', 'G', 'X', 'V', 'P', 'D', 'A', 'R', 'S'];
 
+/// Whether JEDEC 3A's identifier table defines this identifier.
+///
+/// "Standard but unmodelled" and "not in the standard at all" are
+/// different facts: test vectors and pin lists are perfectly legal
+/// JEDEC that deCPLD simply has no use for, whereas an invented
+/// identifier means the file is not what it claims to be. Only the
+/// latter is worth a diagnostic.
+fn is_standard_identifier(identifier: &str) -> bool {
+    TWO_LETTER_IDENTIFIERS.contains(&identifier)
+        || identifier.chars().next().is_some_and(|first| {
+            identifier.len() == first.len_utf8() && ONE_LETTER_IDENTIFIERS.contains(&first)
+        })
+}
+
 /// Split a field into its identifier and body.
 ///
 /// Matched against the standard's identifier table rather than by taking
@@ -457,7 +554,11 @@ mod tests {
     }
 
     fn parse_err(text: &str) -> Vec<u16> {
-        match parse(text, FILE) {
+        parse_err_with(text, ParserMode::default())
+    }
+
+    fn parse_err_with(text: &str, mode: ParserMode) -> Vec<u16> {
+        match parse_with_mode(text, FILE, mode) {
             Ok(parsed) => {
                 panic!("expected a failed parse, got a file with {} fuses", parsed.file.fuses.len())
             }
@@ -757,6 +858,135 @@ mod tests {
         assert!(
             parse_err("\x02h*QF8*F0*G7*\x030000").contains(&codes::INVALID_SECURITY_FIELD.as_u16())
         );
+    }
+
+    // ---- Parser modes ----
+
+    /// A file carrying a `QP` pin count and a `V` test vector — both
+    /// legal JEDEC that deCPLD does not model — plus a `Z` field that is
+    /// not in the standard at all.
+    const WITH_EXTRA_FIELDS: &str = "\x02h*QF8*F0*QP20*V0001 XXXX*Z custom*\x030000";
+
+    #[test]
+    fn preserve_unknown_retains_every_unmodelled_field() {
+        let parsed =
+            parse_with_mode(WITH_EXTRA_FIELDS, FILE, ParserMode::PreserveUnknown).expect("parses");
+        let kept: Vec<&str> =
+            parsed.file.unknown_fields.iter().map(|f| f.identifier.as_str()).collect();
+        assert_eq!(kept, ["QP", "V", "Z"]);
+    }
+
+    #[test]
+    fn preserve_unknown_is_the_default() {
+        let default = parse(WITH_EXTRA_FIELDS, FILE).expect("parses");
+        let explicit =
+            parse_with_mode(WITH_EXTRA_FIELDS, FILE, ParserMode::PreserveUnknown).expect("parses");
+        assert_eq!(default.file, explicit.file);
+    }
+
+    #[test]
+    fn only_non_standard_identifiers_are_warned_about() {
+        // QP and V are legal JEDEC that deCPLD has no use for; that is
+        // not the user's problem and must not produce noise. `Z` is not
+        // in the standard, which is worth saying.
+        let parsed = parse(WITH_EXTRA_FIELDS, FILE).expect("parses");
+        let warned: Vec<_> = parsed
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == codes::UNKNOWN_FIELD)
+            .map(|d| d.message.clone())
+            .collect();
+        assert_eq!(warned.len(), 1, "expected exactly one warning, got {warned:#?}");
+        assert!(warned[0].contains('Z'), "{}", warned[0]);
+    }
+
+    #[test]
+    fn compatible_mode_discards_unmodelled_fields_but_says_so() {
+        // Dropping data silently would make a discarded field
+        // indistinguishable from one that was never there.
+        let parsed =
+            parse_with_mode(WITH_EXTRA_FIELDS, FILE, ParserMode::Compatible).expect("parses");
+        assert!(parsed.file.unknown_fields.is_empty());
+        let discarded =
+            parsed.diagnostics.iter().filter(|d| d.code == codes::FIELD_DISCARDED).count();
+        assert_eq!(discarded, 3, "each dropped field is announced");
+    }
+
+    #[test]
+    fn strict_mode_rejects_a_non_standard_identifier() {
+        let codes = parse_err_with(WITH_EXTRA_FIELDS, ParserMode::Strict);
+        assert!(codes.contains(&codes::UNKNOWN_FIELD.as_u16()));
+    }
+
+    #[test]
+    fn strict_mode_accepts_standard_fields_it_does_not_model() {
+        // QP and V are conformant JEDEC. Strict means "conformant", not
+        // "only what deCPLD understands".
+        let parsed =
+            parse_with_mode("\x02h*QF8*F0*QP20*V0001 XXXX*\x030000", FILE, ParserMode::Strict)
+                .expect("QP and V are legal JEDEC");
+        assert_eq!(parsed.file.unknown_fields.len(), 2);
+    }
+
+    #[test]
+    fn strict_mode_requires_a_transmission_checksum() {
+        let codes = parse_err_with("\x02h*QF8*F0*\x03", ParserMode::Strict);
+        assert!(codes.contains(&codes::MISSING_TRANSMISSION_CHECKSUM.as_u16()));
+        // The lenient modes accept it: files kept on disk rather than
+        // sent down a serial line routinely stop at ETX.
+        assert!(parse_with_mode("\x02h*QF8*F0*\x03", FILE, ParserMode::Compatible).is_ok());
+    }
+
+    // ---- Line endings and whitespace ----
+
+    #[test]
+    fn line_ending_style_does_not_change_the_result() {
+        // JEDEC files come from DOS tooling and arrive with CRLF, LF, or
+        // (from very old tools) bare CR. All three describe one device.
+        let lf = "\x02h*\nQF16*\nF0*\nL0 1010000000000000*\n\x030000";
+        let crlf = lf.replace('\n', "\r\n");
+        let cr = lf.replace('\n', "\r");
+
+        let a = parse_ok(lf);
+        let b = parse_ok(&crlf);
+        let c = parse_ok(&cr);
+        assert_eq!(a.file.fuses, b.file.fuses);
+        assert_eq!(a.file.fuses, c.file.fuses);
+    }
+
+    #[test]
+    fn generous_whitespace_between_fields_is_accepted() {
+        let parsed =
+            parse_ok("\x02h*\r\n\r\n   QF16*  \r\n\tF0*\r\n  L0 1010000000000000*\r\n\x030000");
+        assert_eq!(parsed.file.fuses.len(), 16);
+        assert!(parsed.file.fuses.get(0).unwrap());
+        assert!(parsed.file.fuses.get(2).unwrap());
+    }
+
+    #[test]
+    fn a_terminator_at_the_start_of_the_next_line_is_accepted() {
+        // Galette writes each field's `*` at the start of the following
+        // line rather than immediately after the field text. It is
+        // conformant — the `*` still terminates the preceding field —
+        // but it looks alien enough that a parser written only against
+        // the standard's tidy examples might reject it.
+        let parsed = parse_ok("\x02header\n*F0\n*QF16\n*L0 1010000000000000\n*\x030000");
+        assert_eq!(parsed.file.fuses.len(), 16);
+        assert!(parsed.file.fuses.get(0).unwrap());
+    }
+
+    #[test]
+    fn hex_digits_accept_either_case() {
+        // Galette writes `C403e` — uppercase identifier, lowercase
+        // digits — while WinCUPL writes both uppercase. Identifiers
+        // themselves are uppercase in JEDEC 3A's table and no tool emits
+        // them otherwise, so a lowercase `c` is deliberately NOT
+        // accepted: loosening the grammar past what any implementation
+        // produces buys nothing and blurs what a `C` field is.
+        let lower = parse_ok("\x02h*QF8*F0*L0 11111111*C00ff*\x030000");
+        let upper = parse_ok("\x02h*QF8*F0*L0 11111111*C00FF*\x030000");
+        assert_eq!(lower.file.fuse_checksum, Some(0x00FF));
+        assert_eq!(upper.file.fuse_checksum, Some(0x00FF));
     }
 
     // ---- Spans ----
