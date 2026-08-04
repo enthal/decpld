@@ -1,6 +1,7 @@
 //! A device's fuse states, and who wrote them. SPEC.md §4.2.
 
 use crate::region::{FuseId, FuseMutability, FuseRegions};
+use std::collections::BTreeMap;
 
 /// Why a fuse could not be written.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -130,6 +131,60 @@ impl FuseMap {
     /// not a conflict, and forbidding it would make the order encoders
     /// run in observable. Writing a *different* value is refused.
     pub fn set(&mut self, fuse: FuseId, value: bool) -> Result<(), FuseWriteError> {
+        self.check_writable(fuse, value)?;
+        let index = fuse.0 as usize;
+        self.bits[index] = value;
+        self.written[index] = true;
+        Ok(())
+    }
+
+    /// Apply several writes, or none of them.
+    ///
+    /// Every write is validated — range, mutability, and conflict, both
+    /// against the map and against earlier entries in the same batch —
+    /// before any is applied. A partially applied write is the worst
+    /// available outcome: the map is then neither the old design nor
+    /// the new one, and nothing downstream can tell, because a fuse
+    /// checksum over a half-written map is a perfectly valid checksum
+    /// over the wrong thing.
+    ///
+    /// The same rule as `decpld-jedec`'s fuse-list application, for the
+    /// same reason.
+    pub fn set_all(
+        &mut self,
+        writes: impl IntoIterator<Item = (FuseId, bool)>,
+    ) -> Result<(), FuseWriteError> {
+        let mut pending: BTreeMap<FuseId, bool> = BTreeMap::new();
+        for (fuse, value) in writes {
+            self.check_writable(fuse, value)?;
+            if let Some(&earlier) = pending.get(&fuse)
+                && earlier != value
+            {
+                // `check_writable` resolved the region a line ago, so
+                // this lookup cannot fail; naming the region is the
+                // difference between a diagnostic a user can act on and
+                // one that says a fuse number.
+                let region = self.regions.region_of(fuse).map_or("unclassified", |r| r.name);
+                return Err(FuseWriteError::Conflict {
+                    fuse,
+                    region,
+                    existing: earlier,
+                    attempted: value,
+                });
+            }
+            pending.insert(fuse, value);
+        }
+
+        for (fuse, value) in pending {
+            let index = fuse.0 as usize;
+            self.bits[index] = value;
+            self.written[index] = true;
+        }
+        Ok(())
+    }
+
+    /// Whether [`Self::set`] would accept this write, without doing it.
+    fn check_writable(&self, fuse: FuseId, value: bool) -> Result<(), FuseWriteError> {
         let region = self
             .regions
             .region_of(fuse)
@@ -139,9 +194,7 @@ impl FuseMap {
             FuseMutability::Reserved(required) => {
                 return Err(FuseWriteError::Reserved { fuse, region: region.name, required });
             }
-            FuseMutability::Security => {
-                return Err(FuseWriteError::Security { fuse });
-            }
+            FuseMutability::Security => return Err(FuseWriteError::Security { fuse }),
             FuseMutability::Programmable | FuseMutability::UserSignature => {}
         }
 
@@ -154,9 +207,6 @@ impl FuseMap {
                 attempted: value,
             });
         }
-
-        self.bits[index] = value;
-        self.written[index] = true;
         Ok(())
     }
 
@@ -387,5 +437,76 @@ mod tests {
         let _ = map.set(FuseId(15), true);
         let _ = map.set(FuseId(99), true);
         assert_eq!(map.iter().collect::<Vec<_>>(), before);
+    }
+
+    #[test]
+    fn set_all_applies_every_write_or_none_of_them() {
+        // The all-or-none rule, stated directly. Nothing exercised it:
+        // replacing `set_all`'s body with a plain `for … { self.set(…)? }`
+        // loop passed the entire workspace suite, because its only
+        // caller resolves every failure before reaching it.
+        //
+        // A half-applied batch is the outcome this method exists to
+        // prevent — the map is then neither the old design nor the new
+        // one, and a fuse checksum over it is a valid checksum over the
+        // wrong thing.
+        let mut map = FuseMap::erased(device());
+        map.set(FuseId(3), false).expect("a first writer claims fuse 3");
+        let before: Vec<bool> = map.iter().collect();
+
+        // Fuse 0 is writable; fuse 3 now conflicts. A sequential
+        // implementation commits fuse 0 before discovering fuse 3.
+        let error = map
+            .set_all([(FuseId(0), false), (FuseId(3), true)])
+            .expect_err("the batch must be refused");
+        assert!(matches!(error, FuseWriteError::Conflict { fuse: FuseId(3), .. }), "{error:?}");
+
+        assert_eq!(map.iter().collect::<Vec<_>>(), before, "a refused batch wrote something");
+        assert!(!map.is_written(FuseId(0)), "fuse 0 was claimed by a refused batch");
+    }
+
+    #[test]
+    fn set_all_refuses_a_batch_that_disagrees_with_itself() {
+        // Conflict detection *within* the batch, which the map's
+        // written-bits cannot catch because neither write has landed.
+        // Two encoders disagreeing about one fuse must be detected
+        // whether they run in sequence or arrive together.
+        let mut map = FuseMap::erased(device());
+        let error = map
+            .set_all([(FuseId(0), false), (FuseId(1), false), (FuseId(0), true)])
+            .expect_err("a batch cannot hold one fuse at two values");
+        assert_eq!(
+            error,
+            FuseWriteError::Conflict {
+                fuse: FuseId(0),
+                region: "array",
+                existing: false,
+                attempted: true,
+            }
+        );
+        assert!(!map.is_written(FuseId(1)), "an unrelated write in the batch was applied");
+    }
+
+    #[test]
+    fn set_all_accepts_a_batch_that_repeats_a_fuse_with_one_value() {
+        // Agreement is not disagreement, in a batch as in sequence.
+        let mut map = FuseMap::erased(device());
+        map.set_all([(FuseId(0), false), (FuseId(0), false)]).expect("agreeing writes");
+        assert_eq!(map.get(FuseId(0)), Some(false));
+        assert!(map.is_written(FuseId(0)));
+    }
+
+    #[test]
+    fn set_all_refuses_reserved_and_out_of_range_fuses_without_writing() {
+        let mut map = FuseMap::erased(device());
+        let before: Vec<bool> = map.iter().collect();
+        for batch in [
+            vec![(FuseId(0), false), (FuseId(8), false)],
+            vec![(FuseId(0), false), (FuseId(9999), false)],
+        ] {
+            assert!(map.set_all(batch).is_err());
+            assert_eq!(map.iter().collect::<Vec<_>>(), before);
+            assert!(!map.is_written(FuseId(0)));
+        }
     }
 }

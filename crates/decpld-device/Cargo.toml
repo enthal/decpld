@@ -10,9 +10,11 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+decpld-logic.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+decpld-logic.workspace = true
 proptest.workspace = true
 
 [lints]
