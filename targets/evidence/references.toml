@@ -32,10 +32,13 @@ retrieved = "2026-08-04"
 revision = "3A"
 authoritative_for = [
   "STX/ETX transmission framing",
-  "field syntax and the identifier table (N, QF, QP, QV, F, L, C, X, V, P, G, R/S/T, A)",
+  "field syntax: <field identifier> (lines 219-221) and <reserved identifier> (lines 223-225)",
+  "the <field character> class (lines 158-160)",
+  "Q subfields QF/QP/QV and the value-field ordering rule (lines 305-325)",
   "transmission checksum algorithm",
   "fuse checksum algorithm and 8-bit word packing",
   "L-field override semantics for patched files",
+  "F-field cardinality and its position before the fuse lists (lines 357-377)",
 ]
 notes = """
 Contains worked numeric examples for both checksums. Those examples are \
@@ -62,7 +65,22 @@ are not:
    four 27-state blocks placed on a 28-fuse stride. Characters have been \
    lost somewhere in the document's history. These examples are therefore \
    NOT used as golden tests; the checksum examples, which are internally \
-   consistent and verified arithmetically, are.\
+   consistent and verified arithmetically, are.
+
+3. The two identifier tables disagree about R, S and T. The summary table \
+   at line 74 calls them collectively "Signature analysis"; the detailed \
+   table at lines 243-245 gives R = Resulting vector, S = Starting vector, \
+   T = Test cycles. This does not affect deCPLD, which needs only the fact \
+   that all three are defined identifiers, and both tables agree on that. \
+   Recorded because this copy's examples are already known unreliable and \
+   a future reader should not have to rediscover it.
+
+Identifier tables transcribed from the BNF (the normative statement) \
+rather than the prose table, and checked by a property no partial \
+transcription can satisfy: the 14 defined and 12 reserved identifiers are \
+disjoint and cover A-Z exactly. An earlier transcription omitted T and Q \
+and had no notion of "reserved" at all; the partition check is what makes \
+that class of error impossible to reintroduce silently.\
 """
 
 [[reference]]

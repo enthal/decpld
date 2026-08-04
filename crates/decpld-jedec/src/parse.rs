@@ -147,14 +147,17 @@ pub fn parse_with_mode(
             let lead = raw.len() - trimmed.len();
             let (identifier, field_body) = split_identifier(trimmed);
 
-            if !identifier.is_empty() {
-                fields.push(RawField {
-                    identifier,
-                    body: field_body,
-                    body_offset: body_start + cursor as u32 + lead as u32 + identifier.len() as u32,
-                    span: range,
-                });
-            }
+            // Recorded even when the identifier is empty. Dropping those
+            // silently deleted the field from a rewrite in the mode whose
+            // whole purpose is losing nothing, and left the only
+            // remaining "not in the standard" case unreachable and
+            // unreported (issue #24).
+            fields.push(RawField {
+                identifier,
+                body: field_body,
+                body_offset: body_start + cursor as u32 + lead as u32 + identifier.len() as u32,
+                span: range,
+            });
         }
 
         cursor = star + 1;
@@ -331,7 +334,7 @@ pub fn parse_with_mode(
                     );
                     continue;
                 }
-                apply_fuse_list(field, &mut fuses, &mut diagnostics, file);
+                let _ = apply_fuse_list(field, &mut fuses, &mut diagnostics, file);
             }
             "C" => match parse_hex16(field.body.trim()) {
                 Some(value) => fuse_checksum = Some(value),
@@ -392,16 +395,28 @@ pub fn parse_with_mode(
                 }
             }
             other => {
-                let standard = is_standard_identifier(other);
-                if !standard {
-                    let message = format!("`{other}` is not a JEDEC 3A field identifier");
+                // Three outcomes, not two. A field can be legal JEDEC
+                // deCPLD has no use for (say so: nothing), reserved by
+                // the standard (say nothing — it tells receivers to
+                // ignore these), or not a field identifier at all (say
+                // so loudly).
+                if classify(other) == IdentifierClass::NotInStandard {
+                    let message = if other.is_empty() {
+                        "field does not begin with an identifier".to_owned()
+                    } else {
+                        format!("`{other}` is not a JEDEC 3A field identifier")
+                    };
                     let diagnostic = if mode == ParserMode::Strict {
                         Diagnostic::error(codes::UNKNOWN_FIELD, message)
                     } else {
                         Diagnostic::warning(codes::UNKNOWN_FIELD, message)
                     };
                     diagnostics.push(
-                        diagnostic.with_label(Label::primary(at(field.span), "unrecognised field")),
+                        diagnostic
+                            .with_label(Label::primary(at(field.span), "unrecognised field"))
+                            .with_note(
+                                "JEDEC 3A field identifiers are single letters, optionally followed by subfield characters",
+                            ),
                     );
                 }
 
@@ -515,13 +530,26 @@ pub fn parse_with_mode(
     })
 }
 
-/// Apply one `L<number> <states>` field.
+/// Apply one `L<number> <states>` field, all or nothing.
+///
+/// States are collected into a scratch list and committed to `fuses`
+/// only once the whole field is known good. Writing as it went left the
+/// live vector half-updated on any fault; that was safe only because
+/// every early return also pushed an error and `parse` gates on
+/// `has_errors()` — an invariant held by two distant pieces of code and
+/// enforced by neither. Downgrading one of those diagnostics to a
+/// warning, or adding a `--best-effort` mode, would have shipped a
+/// half-applied fuse vector with nothing to catch it.
+///
+/// Returns `Err(())` when nothing was applied, so a caller cannot
+/// mistake a rejected field for an accepted one. CLAUDE.md: make wrong
+/// states unrepresentable rather than guarding against them.
 fn apply_fuse_list(
     field: &RawField<'_>,
     fuses: &mut FuseVector,
     diagnostics: &mut DiagnosticBundle,
     file: FileId,
-) {
+) -> Result<(), ()> {
     let trimmed = field.body.trim_start();
     let lead = (field.body.len() - trimmed.len()) as u32;
 
@@ -548,7 +576,7 @@ fn apply_fuse_list(
             .with_note("JEDEC 3A requires a space or carriage return after the fuse number")
             .with_note("fuse states are 0 and 1, which are also digits, so this cannot be guessed"),
         );
-        return;
+        return Err(());
     };
     let (number, states) = trimmed.split_at(separator);
     let states_offset = field.body_offset + lead + separator as u32;
@@ -559,10 +587,13 @@ fn apply_fuse_list(
                 Label::primary(Span::new(file, field.span), "expected `L<number> <states>*`"),
             ),
         );
-        return;
+        return Err(());
     };
 
+    let mut pending: Vec<(u32, bool)> = Vec::new();
     let mut fuse = start;
+    let mut sound = true;
+
     for (offset, ch) in states.char_indices() {
         // Delimiters may appear anywhere among the states; the standard
         // shows the same data grouped three different ways.
@@ -577,6 +608,10 @@ fn apply_fuse_list(
             '0' => false,
             '1' => true,
             other => {
+                // Reported and skipped rather than abandoning the field.
+                // The module promises one run reports as much as
+                // possible; stopping here made a file with three bad
+                // characters take three runs to fix.
                 diagnostics.push(
                     Diagnostic::error(
                         codes::INVALID_FUSE_STATE,
@@ -584,10 +619,16 @@ fn apply_fuse_list(
                     )
                     .with_label(Label::primary(Span::new(file, at_char), "not a fuse state")),
                 );
-                return;
+                sound = false;
+                fuse += 1;
+                continue;
             }
         };
-        if fuses.set(fuse, state).is_err() {
+        if fuse >= fuses.len() {
+            // Unlike a bad character, this does not recover: every state
+            // after it is out of range too, so continuing would emit one
+            // diagnostic per remaining character, all saying the same
+            // thing.
             diagnostics.push(
                 Diagnostic::error(
                     codes::FUSE_OUT_OF_RANGE,
@@ -599,32 +640,80 @@ fn apply_fuse_list(
                 ))
                 .with_note("QF declares the device's fuse count; an L field may not exceed it"),
             );
-            return;
+            return Err(());
         }
+        pending.push((fuse, state));
         fuse += 1;
     }
+
+    if !sound {
+        return Err(());
+    }
+    for (fuse, state) in pending {
+        // Cannot fail: every fuse was range-checked above, against the
+        // same vector, which does not change in between.
+        let _ = fuses.set(fuse, state);
+    }
+    Ok(())
 }
 
-/// The two-letter field identifiers from JEDEC 3A's identifier table.
+/// The `Q` subfields JEDEC 3A defines (lines 308-316). Listed separately
+/// from the split table below because their second letter is part of the
+/// identifier: the standard writes `QF1024` as identifier `QF`, body
+/// `1024`.
 const TWO_LETTER_IDENTIFIERS: [&str; 3] = ["QF", "QP", "QV"];
 
-/// The one-letter field identifiers from JEDEC 3A's identifier table.
-/// `D` is listed as obsolete but still appears in older files.
-const ONE_LETTER_IDENTIFIERS: [char; 12] =
-    ['N', 'F', 'L', 'C', 'G', 'X', 'V', 'P', 'D', 'A', 'R', 'S'];
-
-/// Whether JEDEC 3A's identifier table defines this identifier.
+/// Identifiers deCPLD splits after a single letter.
 ///
-/// "Standard but unmodelled" and "not in the standard at all" are
-/// different facts: test vectors and pin lists are perfectly legal
-/// JEDEC that deCPLD simply has no use for, whereas an invented
-/// identifier means the file is not what it claims to be. Only the
-/// latter is worth a diagnostic.
-fn is_standard_identifier(identifier: &str) -> bool {
-    TWO_LETTER_IDENTIFIERS.contains(&identifier)
-        || identifier.chars().next().is_some_and(|first| {
-            identifier.len() == first.len_utf8() && ONE_LETTER_IDENTIFIERS.contains(&first)
-        })
+/// This is a statement about **naming**, not about conformance — it
+/// decides where the identifier ends and the body begins, so that
+/// `N some note` is a note rather than a field called `Nsome`.
+///
+/// Keeping it apart from [`classify`]'s tables is the point. Reusing one
+/// table for both jobs is what dropped `T` and `Q` from the standard's
+/// identifier set: a letter had to earn its place by being splittable,
+/// and `Q` is not (its subfields take two letters), so `Q` fell out of
+/// the conformance question too.
+const SPLIT_AT_ONE_LETTER: [char; 13] =
+    ['N', 'F', 'L', 'C', 'G', 'X', 'V', 'P', 'D', 'A', 'R', 'S', 'T'];
+
+/// What JEDEC 3A says about an identifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IdentifierClass {
+    /// In `<field identifier>` (lines 219-221). Structurally legal,
+    /// whether or not deCPLD models it.
+    Defined,
+    /// In `<reserved identifier>` (lines 223-225). Lines 234-236:
+    /// "Receiving equipment should ignore fields starting with reserved
+    /// identifiers."
+    Reserved,
+    /// Not an identifier at all. Because the two tables above partition
+    /// A-Z exactly, this means the field did not begin with a letter.
+    NotInStandard,
+}
+
+/// Classify a field identifier against JEDEC 3A.
+///
+/// Evidence: `jedec-3a` (sha256 `9207f92b…` in
+/// `targets/evidence/references.toml`), `<field identifier>` at lines
+/// 219-221 and `<reserved identifier>` at lines 223-225. The prose table
+/// at lines 239-251 agrees. The two sets are disjoint and cover A-Z, which
+/// `identifier_tables::the_two_tables_partition_the_alphabet` asserts —
+/// the check that would have caught the original transcription.
+///
+/// Classification is by the **first** character, because line 230 permits
+/// multi-character identifiers as subfields ("A1", "A$", "AB3"). So `QX`
+/// is a subfield of the defined `Q`, not an invented identifier.
+fn classify(identifier: &str) -> IdentifierClass {
+    match identifier.chars().next() {
+        Some('A' | 'C' | 'D' | 'F' | 'G' | 'L' | 'N' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'V' | 'X') => {
+            IdentifierClass::Defined
+        }
+        Some('B' | 'E' | 'H' | 'I' | 'J' | 'K' | 'M' | 'O' | 'U' | 'W' | 'Y' | 'Z') => {
+            IdentifierClass::Reserved
+        }
+        _ => IdentifierClass::NotInStandard,
+    }
 }
 
 /// Split a field into its identifier and body.
@@ -642,11 +731,16 @@ fn split_identifier(field: &str) -> (&str, &str) {
         }
     }
     match field.chars().next() {
-        Some(first) if ONE_LETTER_IDENTIFIERS.contains(&first) => field.split_at(first.len_utf8()),
+        Some(first) if SPLIT_AT_ONE_LETTER.contains(&first) => field.split_at(first.len_utf8()),
         Some(first) if first.is_ascii_alphabetic() => {
             let len = field.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(field.len());
             field.split_at(len)
         }
+        // No leading letter, so there is no identifier to find. The
+        // whole field becomes the body and keeps an empty identifier,
+        // rather than being discarded: `classify` calls this
+        // `NotInStandard` and it is reported, but a rewrite must still
+        // emit it unchanged (issue #24).
         _ => ("", field),
     }
 }
@@ -995,9 +1089,12 @@ mod tests {
     // ---- Parser modes ----
 
     /// A file carrying a `QP` pin count and a `V` test vector — both
-    /// legal JEDEC that deCPLD does not model — plus a `Z` field that is
-    /// not in the standard at all.
-    const WITH_EXTRA_FIELDS: &str = "\x02h*QF8*F0*QP20*V0001 XXXX*Z custom*\x030000";
+    /// legal JEDEC that deCPLD does not model, a `Z` field that JEDEC 3A
+    /// *reserves*, and a `123` field that is not a field at all.
+    ///
+    /// All three categories in one fixture, because the interesting
+    /// behaviour is precisely that they are treated differently.
+    const WITH_EXTRA_FIELDS: &str = "\x02h*QF8*F0*QP20*V0001 XXXX*Z custom*123*\x030000";
 
     #[test]
     fn preserve_unknown_retains_every_unmodelled_field() {
@@ -1005,7 +1102,9 @@ mod tests {
             parse_with_mode(WITH_EXTRA_FIELDS, FILE, ParserMode::PreserveUnknown).expect("parses");
         let kept: Vec<&str> =
             parsed.file.unknown_fields.iter().map(|f| f.identifier.as_str()).collect();
-        assert_eq!(kept, ["QP", "V", "Z"]);
+        // The empty identifier is the `123` field: nothing to name it
+        // by, but it must still survive a rewrite.
+        assert_eq!(kept, ["QP", "V", "Z", ""]);
     }
 
     #[test]
@@ -1019,8 +1118,15 @@ mod tests {
     #[test]
     fn only_non_standard_identifiers_are_warned_about() {
         // QP and V are legal JEDEC that deCPLD has no use for; that is
-        // not the user's problem and must not produce noise. `Z` is not
-        // in the standard, which is worth saying.
+        // not the user's problem and must not produce noise.
+        //
+        // `Z` produces none either, and that is the part worth stating:
+        // JEDEC 3A lines 234-236 tell receiving equipment to *ignore*
+        // fields with reserved identifiers, and real Atmel-toolchain
+        // files carry `J` and `U`. Warning about them made deCPLD noisy
+        // about conformant files.
+        //
+        // `123` has no identifier at all, which is worth saying.
         let parsed = parse(WITH_EXTRA_FIELDS, FILE).expect("parses");
         let warned: Vec<_> = parsed
             .diagnostics
@@ -1029,7 +1135,7 @@ mod tests {
             .map(|d| d.message.clone())
             .collect();
         assert_eq!(warned.len(), 1, "expected exactly one warning, got {warned:#?}");
-        assert!(warned[0].contains('Z'), "{}", warned[0]);
+        assert!(warned[0].contains("does not begin with an identifier"), "{}", warned[0]);
     }
 
     #[test]
@@ -1041,7 +1147,7 @@ mod tests {
         assert!(parsed.file.unknown_fields.is_empty());
         let discarded =
             parsed.diagnostics.iter().filter(|d| d.code == codes::FIELD_DISCARDED).count();
-        assert_eq!(discarded, 3, "each dropped field is announced");
+        assert_eq!(discarded, 4, "each dropped field is announced");
     }
 
     #[test]
@@ -1134,6 +1240,215 @@ mod tests {
         let span = diagnostic.primary_span().expect("a primary span");
         // The caret must land on the `2`, not on the field or the file.
         assert_eq!(&text[span.range], "2");
+    }
+}
+
+/// The identifier tables, transcribed from the pinned JEDEC 3A copy.
+///
+/// Evidence: `jedec-3a` (sha256 `9207f92b…`, recorded in
+/// `targets/evidence/references.toml`), re-fetched and re-hashed
+/// 2026-08-03. Both tables come from the BNF, which is the normative
+/// statement; the prose table at lines 239-251 agrees with it.
+#[cfg(test)]
+mod identifier_tables {
+    use super::*;
+    use decpld_diagnostics::FileId;
+
+    const FILE: FileId = FileId(0);
+
+    /// JEDEC 3A lines 219-221, `<field identifier>`.
+    const DEFINED: [char; 14] =
+        ['A', 'C', 'D', 'F', 'G', 'L', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'X'];
+
+    /// JEDEC 3A lines 223-225, `<reserved identifier>`.
+    const RESERVED: [char; 12] = ['B', 'E', 'H', 'I', 'J', 'K', 'M', 'O', 'U', 'W', 'Y', 'Z'];
+
+    #[test]
+    fn the_two_tables_partition_the_alphabet() {
+        // The strongest check available on a hand transcription, and the
+        // one that would have caught the original defect: 14 + 12 = 26,
+        // with no letter in both and no letter in neither. The old table
+        // had twelve entries and no notion of "reserved" at all, so it
+        // could not have satisfied this.
+        let mut seen: Vec<char> = DEFINED.iter().chain(RESERVED.iter()).copied().collect();
+        seen.sort_unstable();
+        let alphabet: Vec<char> = ('A'..='Z').collect();
+        assert_eq!(seen, alphabet, "the tables must cover A-Z exactly once");
+    }
+
+    #[test]
+    fn every_defined_identifier_is_accepted_in_strict_mode() {
+        // `T` (test cycles, line 245) was missing from the old table, so
+        // a conformant file using it was rejected as "not a JEDEC 3A
+        // field identifier". `Q` was missing too, which is why a `Q`
+        // subfield outside QF/QP/QV was mis-reported.
+        // A well-formed body per identifier. The bodies matter: this
+        // test is about the *identifier* being recognised, so a body
+        // that trips a field-specific rule would fail for the wrong
+        // reason and prove nothing.
+        let field = |letter: char| -> String {
+            match letter {
+                'C' => "C0000".to_owned(),   // four hex digits, 0 = "not computed"
+                'Q' => "QX5".to_owned(),     // a subfield; QF is already in the file
+                'L' => "L4 1111".to_owned(), // within the declared 8 fuses
+                'N' => "N a note".to_owned(),
+                'P' => "P1 2 3".to_owned(),
+                'T' => "T4".to_owned(), // test cycles — absent from the old table
+                'V' => "V0001 XXXX".to_owned(),
+                other => format!("{other}0"),
+            }
+        };
+
+        for letter in DEFINED {
+            let body = field(letter);
+            // The field under test goes BEFORE the fuse list: an `F`
+            // after an `L` is rejected for its position, which would
+            // fail this test for a reason that has nothing to do with
+            // identifier classification.
+            let text = format!("\x02h*QF8*F0*{body}*L0 11110000*\x030000");
+            let parsed = parse_with_mode(&text, FILE, ParserMode::Strict);
+            assert!(
+                parsed.is_ok(),
+                "`{body}` is conformant JEDEC 3A and strict mode must accept it: {:?}",
+                parsed.err().map(|b| b.iter().map(|d| d.headline()).collect::<Vec<_>>())
+            );
+        }
+    }
+
+    #[test]
+    fn a_reserved_identifier_is_ignored_rather_than_diagnosed() {
+        // JEDEC 3A lines 234-236: "Reserved identifiers currently have
+        // no function and are reserved for future use. Receiving
+        // equipment should ignore fields starting with reserved
+        // identifiers."
+        //
+        // Real Atmel-toolchain files carry `J` and `U`, so diagnosing
+        // these made `validate --mode strict` reject conformant files.
+        for letter in RESERVED {
+            let text = format!("\x02h*QF8*F0*L0 11110000*{letter}1*\x030000");
+            let parsed = parse_with_mode(&text, FILE, ParserMode::Strict)
+                .unwrap_or_else(|_| panic!("`{letter}` is reserved, not invalid"));
+            let noise: Vec<String> =
+                parsed.diagnostics.iter().map(|d| d.headline().to_string()).collect();
+            assert!(noise.is_empty(), "`{letter}` must be ignored silently, got {noise:?}");
+        }
+    }
+
+    #[test]
+    fn a_reserved_field_still_survives_a_rewrite() {
+        // "Ignore" means "raise no diagnostic", not "discard". Dropping
+        // a vendor's `J` field is the same data loss as dropping test
+        // vectors, in the mode whose purpose is losing nothing.
+        let text = "\x02h*QF8*F0*L0 11110000*J vendor data*\x030000";
+        let file = parse(text, FILE).expect("parses").file;
+        assert_eq!(file.unknown_fields.len(), 1, "the reserved field must be retained");
+        let written = crate::write(&file, crate::WriterStyle::Canonical).expect("writes");
+        assert!(written.contains("J vendor data*"), "{written}");
+    }
+
+    #[test]
+    fn a_q_subfield_outside_the_three_defined_ones_is_structurally_legal() {
+        // Line 230: "Multiple character identifiers can be used to
+        // create subfields (that is, "A1", "A$", or "AB3")." Only F, P
+        // and V are *defined* Q subfields (lines 308-316), but the
+        // standard nowhere forbids others, so deCPLD does not invent a
+        // rejection it cannot cite.
+        let parsed = parse_with_mode("\x02h*QF8*F0*QX5*\x030000", FILE, ParserMode::Strict)
+            .expect("QX is a subfield, not an invented identifier");
+        // The subfield letter belongs to the identifier, the way the
+        // standard writes `QF1024` as identifier QF and body 1024.
+        assert_eq!(parsed.file.unknown_fields[0].identifier, "QX");
+        assert_eq!(parsed.file.unknown_fields[0].body, "5");
+    }
+
+    #[test]
+    fn a_field_whose_identifier_is_not_a_letter_is_reported_and_kept() {
+        // Issue #24, found while designing this change. Because the two
+        // tables partition A-Z, a non-letter identifier is the ONLY way
+        // left to be outside the standard — so this path is now the sole
+        // home of E3040, and it used to drop the field on the floor.
+        let text = "\x02h*QF8*F0*L0 11110000*123*\x030000";
+
+        let parsed = parse(text, FILE).expect("recoverable in the lenient default");
+        assert_eq!(parsed.file.unknown_fields.len(), 1, "the field must not vanish");
+        let written = crate::write(&parsed.file, crate::WriterStyle::Canonical).expect("writes");
+        assert!(written.contains("123*"), "must survive a rewrite: {written}");
+
+        // And it is genuinely non-conformant, so strict mode says so.
+        let strict = parse_with_mode(text, FILE, ParserMode::Strict);
+        assert!(strict.is_err(), "a field with no identifier is not conformant JEDEC");
+    }
+}
+
+/// `L` fields apply all-or-nothing, and report everything wrong with
+/// them. Issue #21.
+#[cfg(test)]
+mod fuse_list_atomicity {
+    use super::*;
+    use crate::codes;
+    use decpld_diagnostics::FileId;
+
+    const FILE: FileId = FileId(0);
+
+    #[test]
+    fn a_bad_state_leaves_no_earlier_fuse_written() {
+        // `apply_fuse_list` used to return on the first bad character
+        // with the fuses before it already written into the live vector.
+        // It was safe only because every early return also pushed an
+        // error and `parse` gates on `has_errors()` — nothing in the
+        // types enforced it, and the function returned `()`, so a caller
+        // could not be made to notice.
+        //
+        // Made structural: writes go to a scratch list and are committed
+        // only if the whole field is good.
+        let bundle = parse("\x02h*QF8*F0*L0 111X0000*\x030000", FILE)
+            .expect_err("a bad fuse state is an error");
+        assert!(bundle.iter().any(|d| d.code == codes::INVALID_FUSE_STATE));
+    }
+
+    #[test]
+    fn every_bad_state_in_a_field_is_reported_not_just_the_first() {
+        // The module promises "parsing continues past recoverable
+        // problems so that one run reports as much as possible", and
+        // then abandoned the field at the first bad character — so a
+        // file with three faults took three runs to fix.
+        let bundle =
+            parse("\x02h*QF8*F0*L0 1X1Y0Z00*\x030000", FILE).expect_err("bad states are errors");
+        let bad = bundle.iter().filter(|d| d.code == codes::INVALID_FUSE_STATE).count();
+        assert_eq!(bad, 3, "expected one diagnostic per bad character");
+    }
+
+    #[test]
+    fn each_reported_state_names_its_own_character() {
+        let bundle = parse("\x02h*QF8*F0*L0 1X1Y0000*\x030000", FILE).expect_err("errors");
+        let messages: Vec<String> = bundle
+            .iter()
+            .filter(|d| d.code == codes::INVALID_FUSE_STATE)
+            .map(|d| d.message.clone())
+            .collect();
+        assert!(messages.iter().any(|m| m.contains('X')), "{messages:?}");
+        assert!(messages.iter().any(|m| m.contains('Y')), "{messages:?}");
+    }
+
+    #[test]
+    fn an_out_of_range_fuse_still_stops_the_field() {
+        // Running off the end is different from a bad character: every
+        // state after it is also out of range, so reporting each one
+        // would be a wall of noise saying one thing.
+        let bundle = parse("\x02h*QF8*F0*L6 1111*\x030000", FILE).expect_err("out of range");
+        let out = bundle.iter().filter(|d| d.code == codes::FUSE_OUT_OF_RANGE).count();
+        assert_eq!(out, 1, "one diagnostic, not one per overflowing state");
+    }
+
+    #[test]
+    fn a_good_field_after_a_bad_one_is_still_read() {
+        // Atomicity is per field, not per file: abandoning everything
+        // after the first bad field would report less, not more.
+        let bundle = parse("\x02h*QF16*F0*L0 111X*L8 11111111*\x030000", FILE).expect_err("errors");
+        assert!(bundle.iter().any(|d| d.code == codes::INVALID_FUSE_STATE));
+        // The second field is well formed and must not have produced a
+        // diagnostic of its own.
+        assert_eq!(bundle.iter().filter(|d| d.code == codes::INVALID_FUSE_STATE).count(), 1);
     }
 }
 

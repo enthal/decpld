@@ -1,6 +1,6 @@
 //! Writing a [`JedecFile`] back out.
 
-use crate::model::JedecFile;
+use crate::model::{JedecField, JedecFile};
 use crate::transmission_checksum;
 
 /// How the output is laid out. SPEC.md §5.6.
@@ -37,6 +37,16 @@ pub enum WriteError {
     /// file that silently reads back as something else.
     #[error("{context} contains an asterisk, which would terminate the field early: {text:?}")]
     AsteriskInText { context: &'static str, text: String },
+
+    /// Text contained a character outside JEDEC 3A's `<field character>`
+    /// class (lines 158-160): `0x20-0x29`, `0x2B-0x7E`, CR, or LF.
+    ///
+    /// A user-fixable condition with a clear cause, so it says so.
+    /// Previously such content was emitted and the file failed its own
+    /// reparse, reporting an internal-error message for what is really
+    /// "this text cannot be spelled in JEDEC".
+    #[error("{context} contains U+{codepoint:04X}, which JEDEC cannot encode: {text:?}")]
+    UnencodableCharacter { context: &'static str, codepoint: u32, text: String },
 
     /// The written file did not read back as the file it came from.
     ///
@@ -113,7 +123,7 @@ fn render(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError> {
 
     // The design specification is the first field and has no identifier.
     let header = &file.design_specification;
-    reject_asterisk("the design specification", header)?;
+    reject_unencodable("the design specification", header)?;
     out.push_str(header);
     out.push_str("*\n");
 
@@ -134,14 +144,14 @@ fn render(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError> {
     let (value_fields, other_fields): (Vec<_>, Vec<_>) =
         file.unknown_fields.iter().partition(|f| f.is_value_field());
     for field in &value_fields {
-        reject_asterisk("an unmodelled field", &field.body)?;
+        reject_unencodable_field(field)?;
         out.push_str(&join_field(&field.identifier, &field.body));
     }
 
     out.push_str(if file.default_fuse { "F1*\n" } else { "F0*\n" });
 
     for note in &file.notes {
-        reject_asterisk("a note", note)?;
+        reject_unencodable("a note", note)?;
         out.push_str(&format!("N {note}*\n"));
     }
 
@@ -162,7 +172,7 @@ fn render(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError> {
     out.push_str(&format!("C{:04X}*\n", file.fuses.checksum()));
 
     for field in &other_fields {
-        reject_asterisk("an unmodelled field", &field.body)?;
+        reject_unencodable_field(field)?;
         out.push_str(&join_field(&field.identifier, &field.body));
     }
 
@@ -214,9 +224,51 @@ fn write_differing_fuses(out: &mut String, file: &JedecFile) {
     }
 }
 
-fn reject_asterisk(context: &'static str, text: &str) -> Result<(), WriteError> {
-    if text.contains('*') {
-        return Err(WriteError::AsteriskInText { context, text: text.to_owned() });
+/// Check both halves of an unmodelled field.
+///
+/// The identifier is checked as well as the body. It never was, and an
+/// identifier of `Z*Z` emitted `Z*Z1*`, which reparses as two fields
+/// with no error raised anywhere.
+fn reject_unencodable_field(field: &JedecField) -> Result<(), WriteError> {
+    reject_unencodable("an unmodelled field identifier", &field.identifier)?;
+    reject_unencodable("an unmodelled field", &field.body)
+}
+
+/// JEDEC 3A's `<field character>` class, lines 158-160:
+///
+/// ```text
+/// <field character> ::= <ASCII 20 hex ... 29 hex>
+///                   |   <ASCII 2B hex ... 7E hex>
+///                   |   <carriage return> | <line feed>
+/// ```
+///
+/// The gap at `0x2A` is the field terminator `*`. Evidence: `jedec-3a`
+/// (sha256 `9207f92b…` in `targets/evidence/references.toml`).
+fn is_field_character(ch: char) -> bool {
+    matches!(ch, '\u{20}'..='\u{29}' | '\u{2B}'..='\u{7E}' | '\r' | '\n')
+}
+
+/// Refuse text JEDEC cannot spell.
+///
+/// One predicate for the whole class rather than a check per offending
+/// character: `reject_asterisk` tested one character out of that class
+/// and was applied to bodies only, so a control character in a header or
+/// an asterisk in an *identifier* sailed through and produced a file
+/// that read back as something else.
+///
+/// `*` keeps its own error because it is the likeliest offender and the
+/// one whose consequence is worth explaining.
+fn reject_unencodable(context: &'static str, text: &str) -> Result<(), WriteError> {
+    if let Some(bad) = text.chars().find(|ch| !is_field_character(*ch)) {
+        return Err(if bad == '*' {
+            WriteError::AsteriskInText { context, text: text.to_owned() }
+        } else {
+            WriteError::UnencodableCharacter {
+                context,
+                codepoint: bad as u32,
+                text: text.to_owned(),
+            }
+        });
     }
     Ok(())
 }
@@ -475,6 +527,135 @@ mod tests {
 
         file.security = Some(true);
         assert!(write(&file, WriterStyle::Canonical).unwrap().contains("G1*"));
+    }
+}
+
+/// The `<field character>` class, and what the writer does with content
+/// outside it. Issue #19.
+#[cfg(test)]
+mod encodability {
+    use super::*;
+    use crate::parse;
+    use decpld_diagnostics::{FileId, Span, TextRange};
+
+    const FILE: FileId = FileId(0);
+
+    fn base() -> crate::JedecFile {
+        parse("\x02h*QF8*F0*L0 11110000*\x030000", FILE).expect("parses").file
+    }
+
+    fn field(identifier: &str, body: &str) -> JedecField {
+        JedecField {
+            identifier: identifier.to_owned(),
+            body: body.to_owned(),
+            span: Span::new(FILE, TextRange::empty_at(0)),
+        }
+    }
+
+    #[test]
+    fn the_class_is_exactly_what_the_standard_states() {
+        // JEDEC 3A lines 158-160:
+        //
+        //   <field character> ::= <ASCII 20 hex ... 29 hex>
+        //                     |   <ASCII 2B hex ... 7E hex>
+        //                     |   <carriage return> | <line feed>
+        //
+        // The gap at 0x2A is `*`, the field terminator — so this one
+        // predicate subsumes the old asterisk check rather than sitting
+        // beside it, and there is no second place for the two to drift.
+        for code in 0u32..=0x10FFFF {
+            let Some(ch) = char::from_u32(code) else { continue };
+            let expected = matches!(code, 0x20..=0x29 | 0x2B..=0x7E) || ch == '\r' || ch == '\n';
+            assert_eq!(is_field_character(ch), expected, "U+{code:04X} ({ch:?})");
+        }
+        assert!(!is_field_character('*'), "the terminator is not a field character");
+    }
+
+    #[test]
+    fn a_control_character_in_the_header_is_refused_with_a_reason() {
+        // Before: `write` returned Ok and the result failed its own
+        // reparse, so the caller got "internal error, please report it"
+        // for a user-fixable condition with a clear cause.
+        let mut file = base();
+        file.design_specification = "bad\u{3}header".to_owned();
+        let error = write(&file, WriterStyle::Canonical).expect_err("cannot be encoded");
+        assert!(
+            matches!(error, WriteError::UnencodableCharacter { .. }),
+            "expected a named cause, got {error:?}"
+        );
+        let text = error.to_string();
+        assert!(text.contains("design specification"), "must name where: {text}");
+        assert!(text.contains("U+0003"), "must name which character: {text}");
+    }
+
+    #[test]
+    fn a_control_character_in_a_note_is_refused() {
+        let mut file = base();
+        file.notes.push("n\u{3}x".to_owned());
+        assert!(matches!(
+            write(&file, WriterStyle::Canonical),
+            Err(WriteError::UnencodableCharacter { .. })
+        ));
+    }
+
+    #[test]
+    fn an_unmodelled_fields_identifier_is_checked_too() {
+        // Measured before this change: `JedecField { identifier: "Z*Z",
+        // body: "1" }` emitted `Z*Z1*`, which reparses as TWO fields
+        // with no error at all. The identifier was never checked —
+        // `reject_asterisk` was applied to bodies only.
+        let mut file = base();
+        file.unknown_fields.push(field("Z*Z", "1"));
+        assert!(matches!(
+            write(&file, WriterStyle::Canonical),
+            Err(WriteError::AsteriskInText { .. })
+        ));
+    }
+
+    #[test]
+    fn a_non_ascii_character_is_refused() {
+        // JEDEC 3A predates Unicode and its field-character class stops
+        // at 0x7E, so `é` genuinely cannot be encoded. Refusing beats
+        // emitting bytes no conforming reader can interpret.
+        let mut file = base();
+        file.notes.push("caf\u{e9}".to_owned());
+        assert!(matches!(
+            write(&file, WriterStyle::Canonical),
+            Err(WriteError::UnencodableCharacter { .. })
+        ));
+    }
+
+    #[test]
+    fn an_asterisk_keeps_its_own_specific_message() {
+        // `*` is by far the likeliest offender and the one with a
+        // consequence worth explaining, so it keeps a dedicated error
+        // rather than being folded into the generic one.
+        let mut file = base();
+        file.notes.push("this * ends the field".to_owned());
+        let error = write(&file, WriterStyle::Canonical).expect_err("refused");
+        assert!(matches!(error, WriteError::AsteriskInText { .. }), "{error:?}");
+        assert!(error.to_string().contains("terminate the field early"), "{error}");
+    }
+
+    #[test]
+    fn everything_in_the_class_still_writes() {
+        // The refusals must not become over-eager: every legal field
+        // character has to survive in a note, including the punctuation
+        // either side of the 0x2A gap.
+        // Anchored with a non-space at each end: the class starts at
+        // 0x20, and notes are trimmed at parse time, so an unanchored
+        // string would be refused for needing normalisation rather than
+        // for containing anything unencodable. That refusal is correct
+        // and tested elsewhere; it is not what this test is about.
+        let legal: String =
+            (0x20u32..=0x7E).filter(|c| *c != 0x2A).filter_map(char::from_u32).collect();
+        let note = format!("A{legal}A");
+
+        let mut file = base();
+        file.notes.push(note.clone());
+        let written = write(&file, WriterStyle::Canonical).expect("all legal characters");
+        let reparsed = parse(&written, FILE).expect("reparses").file;
+        assert_eq!(reparsed.notes[0], note, "every legal character must survive");
     }
 }
 

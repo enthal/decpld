@@ -315,7 +315,10 @@ fn a_successful_parse_still_sends_its_warnings_to_stderr() {
     // error path already went to stderr, so a test that only used a
     // broken file would have passed against the old behaviour too.
     let dir = TempDir::new("validate-warns");
-    let file = dir.write("warn.jed", "\x02h*QF8*F0*L0 11110000*Zzz*\x030000");
+    // `123` has no field identifier at all. `Z` would NOT do: JEDEC 3A
+    // reserves it and tells receivers to ignore such fields, so deCPLD
+    // says nothing about them.
+    let file = dir.write("warn.jed", "\x02h*QF8*F0*L0 11110000*123*\x030000");
 
     let out = decpld(&["jed", "validate", &arg(&file)]);
     assert_eq!(out.status.code(), Some(0), "a file with only warnings is valid");
@@ -334,7 +337,7 @@ fn canonicalize_keeps_stdout_a_pure_jedec_file_when_the_input_warns() {
     // `decpld jed canonicalize in.jed > out.jed` must produce a file a
     // programmer can read, not one with a warning glued to the front.
     let dir = TempDir::new("canon-warns");
-    let file = dir.write("warn.jed", "\x02h*QF8*F0*L0 11110000*Zzz*\x030000");
+    let file = dir.write("warn.jed", "\x02h*QF8*F0*L0 11110000*123*\x030000");
 
     let out = decpld(&["jed", "canonicalize", &arg(&file)]);
     assert_eq!(out.status.code(), Some(0));
@@ -359,7 +362,7 @@ fn diff_reports_the_first_files_diagnostics_even_when_the_second_is_unreadable()
     // whenever b.jed was broken — indistinguishable from a.jed being
     // clean.
     let dir = TempDir::new("diff-warn-then-fail");
-    let good = dir.write("a.jed", "\x02h*QF8*F0*L0 11110000*Zzz*\x030000");
+    let good = dir.write("a.jed", "\x02h*QF8*F0*L0 11110000*123*\x030000");
     let bad = dir.write("b.jed", "not a jedec file at all");
 
     let out = decpld(&["jed", "diff", &arg(&good), &arg(&bad)]);
