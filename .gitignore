@@ -1,0 +1,47 @@
+# Rust build output. Cargo.lock IS committed — deCPLD ships binaries
+# (`decpld`, `decpld-lsp`) and CI builds with `--locked`.
+/target/
+**/target/
+**/*.rs.bk
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+*.iml
+
+# Compiler output from in-tree dev runs. Generated JEDEC belongs in a
+# build directory, never next to the source it came from. Fixture and
+# evidence `.jed` files under `targets/` are checked in deliberately and
+# are not matched by these paths.
+/build/
+/out/
+
+# WinCUPL oracle installation and run artifacts (SPEC.md Part VII).
+# WinCUPL is proprietary: its executables, device libraries, and any
+# embedded serial numbers must never be redistributed from this repo.
+# Only the *derived, normalized* fixtures under `targets/fixtures/` are
+# committed, and only where licensing permits.
+/tools/wincupl/install/
+/tools/wincupl/prefix/
+/tools/wincupl/**/*.exe
+/tools/wincupl/**/*.dl
+/oracle-runs/
+
+# Local agent worktrees: each is a live `git worktree add` into a
+# sibling branch, not source. Without this entry, `git add -A` from the
+# main checkout greedily slurps every worktree directory as a gitlink,
+# polluting commits with cross-session worktree state.
+.claude/worktrees/
+
+# Claude Code local state — machine-specific settings and task locks.
+# The shared, committed config is `.claude/skills/` and CLAUDE.md.
+/.claude/settings*.json
+/.claude/scheduled_tasks.lock
+
+# Logs and scratch
+*.log
+scratch/
+tmp/
