@@ -1425,6 +1425,8 @@ pub struct Cube {
     pub literals: Vec<Literal>,
 }
 
+pub enum Polarity { True, Complement }
+
 pub struct Literal {
     pub input: BoolInputId,
     pub polarity: Polarity,
@@ -1432,6 +1434,12 @@ pub struct Literal {
 ```
 
 A cube is an AND term; an SOP is an OR of cubes.
+
+**The empty cube is constantly true and the empty SOP is constantly false.** They are duals, and getting either backwards inverts a design. The convention is load-bearing rather than a matter of taste: an all-blown product-term row on a GAL *is* the empty AND.
+
+`evaluate` on a `Cube` or an `Sop` takes a partial assignment and answers `Option<bool>`: `None` when the value genuinely depends on an input the assignment does not cover. Reading an uncovered input as false would let a partial assignment produce a definite answer, which is how the RTL simulator and the decoded-fuse simulator (§9.1, §9.2) come to disagree about the same design while both look right. A cube short-circuits on its first false literal and a sum on its first true cube, so an answer that is already determined does not require the rest.
+
+`Cube::canonical` sorts and de-duplicates a cube's literals. Two cubes that AND the same literals are the same function however they were written, and encoding through hardware cannot preserve order, so equality after a round-trip is equality of canonical forms. A repeated literal is dropped; a contradictory pair is **kept**, since `a & !a` is a real function and discarding half of it would turn a refusable design into a plausible one.
 
 For every output compute and retain minimized covers for both `f` and `!f`, since output polarity may make one cheaper.
 
@@ -1551,6 +1559,8 @@ pub enum FuseWriteError {
 
 Writing the same value twice is not a conflict. Two encoders agreeing is not a disagreement, and refusing it would make the order encoders run in observable. Writing a *different* value is refused, and the first write stands — averaging or last-writer-wins produces a device that behaves like neither design, with nothing to indicate it happened.
 
+`set_all` applies several writes or none of them, validating range, mutability, and conflict — against the map *and* against earlier entries in the same batch — before applying any. A partially applied write is the worst available outcome: the map is then neither the old design nor the new one, and a fuse checksum over a half-written map is a perfectly valid checksum over the wrong thing. Same rule as `decpld-jedec`'s fuse-list application, for the same reason.
+
 The security fuse is not reachable through the ordinary write path at all. It has its own method, so arriving at it is a deliberate act rather than the result of an encoder sweeping a fuse range.
 
 ## 4.3 Configuration fields
@@ -1574,9 +1584,11 @@ Only this layer knows whether a logical option is encoded by fuse zero or one.
 
 ```rust
 pub struct AndMatrixSpec {
-    pub rows: Vec<ProductTermSpec>,
-    pub sources: Vec<LiteralSource>,
-    pub cells: Vec<Vec<MatrixCellSpec>>,
+    // Private: validated on construction (see the rules below), and
+    // indexed by id rather than by position.
+    rows: Vec<ProductTermSpec>,
+    sources: Vec<LiteralSource>,
+    cells: Vec<Vec<MatrixCellSpec>>,
 }
 
 pub struct MatrixCellSpec {
@@ -1591,9 +1603,106 @@ pub struct LiteralSource {
     pub complement_column: MatrixColumn,
     pub physical_source: PhysicalSignalSource,
 }
+
+pub struct MatrixColumn(pub u32);
+pub struct ProductTermId(pub u32);
+
+pub struct ProductTermSpec {
+    pub id: ProductTermId,
+    pub role: ProductTermRole,
+}
+
+pub enum ProductTermRole {
+    Data { macrocell: MacrocellId },
+    OutputEnable { macrocell: MacrocellId },
+    AsynchronousReset,
+    SynchronousPreset,
+}
+
+pub enum PhysicalSignalSource {
+    Pin(PinNumber),
+    Feedback(MacrocellId),
+}
 ```
 
-Encoding a cube initializes the selected row to disconnected, connects each required literal, rejects contradictions, and then decodes the row to verify it.
+`ProductTermRole` names the resource a row belongs to, which is what makes §4.7's "every product term belongs to the expected resource" checkable rather than a comment.
+
+```rust
+impl AndMatrixSpec {
+    pub fn new(
+        rows: Vec<ProductTermSpec>,
+        sources: Vec<LiteralSource>,
+        cells: Vec<Vec<MatrixCellSpec>>,
+    ) -> Result<Self, MatrixError>;
+
+    pub fn rows(&self) -> &[ProductTermSpec];
+    pub fn sources(&self) -> &[LiteralSource];
+    pub fn columns(&self) -> u32;
+    pub fn row(&self, row: ProductTermId) -> Option<ProductTermSpec>;
+    pub fn row_cells(&self, row: ProductTermId) -> Option<&[MatrixCellSpec]>;
+    pub fn source(&self, input: BoolInputId) -> Option<LiteralSource>;
+    pub fn cell_for_literal(&self, row: ProductTermId, literal: Literal) -> Option<MatrixCellSpec>;
+}
+
+pub enum MatrixError {
+    Empty,
+    NoSources,
+    ColumnHasNoSource { column: MatrixColumn },
+    TooManyColumns { cells: usize },
+    RowIdUsedTwice { row: ProductTermId },
+    SourceIdUsedTwice { input: BoolInputId },
+    RowCountMismatch { cells: usize, rows: usize },
+    RaggedRow { row: ProductTermId, cells: u32, columns: u32 },
+    ColumnOutOfRange { column: MatrixColumn, columns: u32 },
+    ColumnUsedTwice { column: MatrixColumn },
+    SenseColumnsCollide { input: BoolInputId, column: MatrixColumn },
+    FuseUsedTwice { fuse: FuseId },
+    CellCannotDistinguish { fuse: FuseId },
+}
+
+pub enum EncodeError {
+    UnknownRow { row: ProductTermId },
+    ContradictoryCube { row: ProductTermId, input: BoolInputId },
+    UnroutableLiteral { row: ProductTermId, input: BoolInputId },
+    Fuse { row: ProductTermId, source: FuseWriteError },
+    Decode { row: ProductTermId, source: DecodeError },
+    RoundTrip { row: ProductTermId, requested: Cube, decoded: Cube },
+}
+
+pub enum DecodeError {
+    UnknownRow { row: ProductTermId },
+    FuseOutOfRange { row: ProductTermId, fuse: FuseId },
+}
+```
+
+A column that no source drives is refused. Such a column is dead silicon — every row would blow it and no decode would read it — so a literal routed there would vanish with no layer noticing. A device with genuinely spare columns is a deliberate model decision, made by changing this rule rather than by discovering it later.
+
+`connected_value` and `disconnected_value` are carried **per cell** rather than assumed globally, because which value means connected is a device fact. On the GAL family a `0` is an intact link, so `connected_value` is `false` — the reverse of the reflex reading, and inverting it produces a device that computes the complement of the design while still emitting a valid checksum.
+
+`AndMatrixSpec` is validated on construction, so §4.7's "matrix cells map one-to-one to fuses" holds for every value of the type. Construction refuses: an empty matrix, a repeated row or source id, a cell grid that does not match the rows, a ragged row, a column outside the array, a column carrying two sources, one source using a single column for both senses, a fuse appearing in two cells anywhere in the matrix, and a cell whose connected and disconnected values are equal.
+
+Encoding a cube computes every cell's final state, rejects contradictions and unroutable literals **before writing anything**, applies the whole row in one atomic write, and then decodes the row and compares. The order matters and the halves are inseparable, so they live in one function rather than as steps a caller sequences:
+
+```rust
+pub fn encode_cube(
+    map: &mut FuseMap,
+    matrix: &AndMatrixSpec,
+    row: ProductTermId,
+    cube: &Cube,
+) -> Result<(), EncodeError>;
+
+pub fn decode_row(
+    map: &FuseMap,
+    matrix: &AndMatrixSpec,
+    row: ProductTermId,
+) -> Result<Cube, DecodeError>;
+```
+
+The whole row is written, not only its connected cells, so the result depends on the cube alone rather than on what the row held before. Writing the disconnected state to the row and *then* connecting the literals would make the encoder conflict with its own first pass, since `FuseMap` tracks writes.
+
+The round-trip compares **canonical** cubes (§3.9). A row is a set of connections with no order to preserve, so requiring decoded literals in the order they were written would fail on correct output.
+
+`decode_row` is total over any fuse vector, because `jed inspect` reads files this compiler did not write. A row holding an input at both polarities is physically meaningful — constantly false — so it decodes to a cube that *is* a contradiction rather than to an error or to one literal with the other silently dropped.
 
 ## 4.5 Macrocells
 
@@ -1650,6 +1759,8 @@ impl PackageSpec {
     pub fn pin_of_clock(&self, clock: ClockResourceId) -> Option<PinNumber>;
     pub fn pin_of_input(&self, input: InputResourceId) -> Option<PinNumber>;
 }
+
+pub struct MacrocellId(pub u8);
 
 pub enum PackagePin {
     Power(PowerRail),
@@ -2725,23 +2836,54 @@ fn encode_cube(
     row: ProductTermId,
     cube: &Cube,
 ) -> Result<(), EncodeError> {
-    for cell in matrix.row(row).cells() {
-        map.set(cell.fuse, cell.disconnected_value)?;
+    let cells = matrix.row_cells(row).ok_or(EncodeError::UnknownRow { row })?;
+    let cube = cube.canonical();
+
+    if let Some(input) = cube.contradiction() {
+        return Err(EncodeError::ContradictoryCube { row, input });
     }
 
-    let mut seen = HashMap::<BoolInputId, Polarity>::new();
-    for literal in &cube.literals {
-        if let Some(previous) = seen.insert(literal.input, literal.polarity) {
-            if previous != literal.polarity {
-                return Err(EncodeError::ContradictoryCube);
-            }
-        }
-        let cell = matrix.cell_for_literal(row, *literal)?;
-        map.set(cell.fuse, cell.connected_value)?;
+    // Resolve every literal before deciding any fuse value.
+    let mut connected = BTreeSet::new();
+    for &literal in &cube.literals {
+        let cell = matrix
+            .cell_for_literal(row, literal)
+            .ok_or(EncodeError::UnroutableLiteral { row, input: literal.input })?;
+        connected.insert(cell.fuse);
     }
-    Ok(())
+
+    // Every cell of the row gets its final state, computed once.
+    let writes: Vec<(FuseId, bool)> = cells
+        .iter()
+        .map(|cell| {
+            let value = if connected.contains(&cell.fuse) {
+                cell.connected_value
+            } else {
+                cell.disconnected_value
+            };
+            (cell.fuse, value)
+        })
+        .collect();
+
+    // Decode the values that are ABOUT to be written and compare, then
+    // commit. Verifying after the write would leave a failed check with
+    // the row already committed.
+    let decoded = decode_values(matrix, cells, |fuse| lookup(&writes, fuse));
+    if decoded != cube {
+        return Err(EncodeError::RoundTrip { row, requested: cube, decoded });
+    }
+
+    map.set_all(writes).map_err(|source| EncodeError::Fuse { row, source })
 }
 ```
+
+**One write per cell, not two.** An earlier version of this section blew the whole row and then connected each literal. That cannot work against a `FuseMap` that tracks writes (§4.2): the second write to a literal's cell is a conflict with the encoder's own first pass. The row's final state is computed once and applied once.
+
+**The contradiction check uses `BTreeSet`, not `HashMap`.** Iteration order must not reach a diagnostic (§0.2), and the check runs on the canonical cube so that two callers building the same literal set in different orders get the same error.
+
+**The whole row is written**, not only its connected cells, so the result depends on the cube alone rather than on what the row held before.
+
+**What the round-trip inside `encode_cube` does and does not catch.** It re-reads the values it is about to write through the same `AndMatrixSpec`, so it detects a `FuseMap` or encoding-path regression. It cannot detect a *wrong device table* — a mistaken column, fuse number, or row block is applied identically in both directions and the comparison passes. CLAUDE.md's *encode, then decode, then compare* obligation is discharged at the compile-driver level (§12.1), against the design the compiler intended, and this local check is not a substitute for it.
 
 ## 12.4 Fitter recursion
 

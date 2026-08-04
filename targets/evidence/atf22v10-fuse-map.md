@@ -280,7 +280,11 @@ Experiments: `arch-comb-high` (PartNo 00), `sig-partno-41`, `sig-partno-5A`.
 
 ## Not established
 
-- **Which fuse value means "connected"** is taken from JEDEC 3A's definition (0 is a low-resistance link) rather than measured on hardware.
+- **Which fuse value means "connected"** rests on `jedec-3a` lines 344-348 — "a zero, specifying a low resistance link … or a one, specifying a high resistance link" — rather than on hardware. `DatasheetSpecified`, one witness.
+
+  Every experiment above is *consistent* with it: a single-literal design leaves exactly one `0`, at the column measured for the pin driving it. That is not independent corroboration. The reader that decodes these files and the encoder that will write them share the convention, so a world in which both are inverted produces exactly the same observations. Only programming a part and measuring its behaviour distinguishes the two, and nothing here is `HardwareVerified`.
+
+  It is the single most consequential bit in the project: inverting it computes the complement of every design behind a perfectly valid checksum.
 
 ## The complete fuse address map
 

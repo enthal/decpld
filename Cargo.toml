@@ -33,6 +33,7 @@ unsafe_code = "forbid"
 [workspace.dependencies]
 decpld-diagnostics = { path = "crates/decpld-diagnostics" }
 decpld-jedec = { path = "crates/decpld-jedec" }
+decpld-logic = { path = "crates/decpld-logic" }
 decpld-device = { path = "crates/decpld-device" }
 decpld-atf22v10 = { path = "crates/decpld-atf22v10" }
 

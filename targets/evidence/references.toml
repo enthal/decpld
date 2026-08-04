@@ -38,6 +38,7 @@ authoritative_for = [
   "transmission checksum algorithm",
   "fuse checksum algorithm and 8-bit word packing",
   "L-field override semantics for patched files",
+  "fuse state semantics: 0 is a low-resistance link, 1 a high-resistance one (lines 344-348)",
   "F-field cardinality and its position before the fuse lists (lines 357-377)",
   "the rule that a file with no F field must state every fuse (line 376)",
 ]

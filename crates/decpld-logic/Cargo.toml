@@ -1,0 +1,15 @@
+[package]
+name = "decpld-logic"
+description = "Boolean functions in sum-of-products form. Speaks in Boolean inputs and literals; knows nothing about pins, macrocells, or fuses."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

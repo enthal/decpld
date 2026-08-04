@@ -21,6 +21,21 @@ impl fmt::Display for PinNumber {
     }
 }
 
+/// A macrocell: one output cell of a PAL/GAL array.
+///
+/// Indexed by the target, which documents its own numbering — the two
+/// fuse orderings on a real part frequently disagree with each other,
+/// so "macrocell 3" only means something relative to a stated
+/// convention.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MacrocellId(pub u8);
+
+impl fmt::Display for MacrocellId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "macrocell {}", self.0)
+    }
+}
+
 /// An I/O cell — the pad a macrocell drives and reads back through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PadId(pub u8);

@@ -6,18 +6,31 @@
 //!
 //! ```text
 //! language semantics    behaviour
-//! target-independent IR behaviour, optimised
+//! decpld-logic          behaviour as Boolean functions
 //! THIS LAYER            product terms, macrocells, fuses
 //! decpld-jedec          bytes on disk
 //! ```
+//!
+//! This crate depends on `decpld-logic`, and that direction is the
+//! correct one. Dependencies flow downward: the layer that *maps*
+//! behaviour to hardware must be able to name the behaviour it is
+//! mapping, so a matrix column can say which Boolean input it carries.
+//! The reverse would be the violation — `decpld-logic` contains no
+//! fuse, pin, macrocell, or column, and must not.
 
+mod and_matrix;
 mod fuse_map;
 mod package;
 mod region;
 
+pub use and_matrix::{
+    AndMatrixSpec, DecodeError, EncodeError, LiteralSource, MatrixCellSpec, MatrixColumn,
+    MatrixError, PhysicalSignalSource, ProductTermId, ProductTermRole, ProductTermSpec, decode_row,
+    encode_cube,
+};
 pub use fuse_map::{FuseMap, FuseWriteError};
 pub use package::{
-    ClockResourceId, InputResourceId, PackageError, PackageId, PackagePin, PackageSpec, PadId,
-    PinNumber, PowerRail,
+    ClockResourceId, InputResourceId, MacrocellId, PackageError, PackageId, PackagePin,
+    PackageSpec, PadId, PinNumber, PowerRail,
 };
 pub use region::{FuseId, FuseMutability, FuseRegion, FuseRegions, RegionError};
