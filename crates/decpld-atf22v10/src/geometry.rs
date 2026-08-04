@@ -290,6 +290,13 @@ impl Atf22v10Geometry {
     /// Galette's `OLMC_SIZE_22V10` and with the datasheet's Figure 1-1
     /// "8 TO 16 PRODUCT TERMS" (size minus the OE row gives 8..16).
     ///
+    /// The sizes are also measured, by filling three blocks: `cap23-8`
+    /// writes rows 1-9 and stops, `cap19-16` writes 49-65, `cap14-8`
+    /// writes 122-130 — both ends of the map and the widest block in
+    /// the middle. One term more is refused in each case (`cap23-9`,
+    /// `cap19-17`, `cap14-9`), which is what turns a size read off two
+    /// agreeing documents into a boundary.
+    ///
     /// Row blocks ascend with the pin: index 0 (pin 14) is at row 122,
     /// index 9 (pin 23) at row 1. This is the **opposite** direction
     /// from [`Self::architecture_pair`], and that reversal is measured,

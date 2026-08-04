@@ -116,7 +116,36 @@ row-block index i  <->  pin 14 + i
 
 measured at *i* = 9 (pin 23) and *i* = 8 (pin 22). Block sizes minus the OE row give 8–16 data terms, matching the datasheet's Figure 1-1 "8 TO 16 PRODUCT TERMS".
 
-Experiments: `in2` (pin 23 alone), `fb22` (pins 22 and 23).
+Experiments: `in2` (pin 23 alone), `fb22` (pins 22 and 23). [Capacity](#capacity) below measures three blocks in full, by filling them.
+
+## Capacity
+
+SPEC.md §7.4's capacity group: "one through *N* independent product terms per macrocell; determine exact row ownership and fit boundary."
+
+Everything above establishes where a block *starts*. Nothing above says what happens at the term after it ends — the block sizes came from Galette's `OLMC_SIZE_22V10` and the datasheet's "8 TO 16 PRODUCT TERMS", which is two documents agreeing rather than a boundary. These designs ask directly.
+
+**A sum of *N* distinct single literals is already minimal SOP.** CUPL cannot merge `i0 # i1 # … # i(N-1)` into fewer terms, so *N* literals need exactly *N* product terms — which is what makes the count in the source text a count of rows. Designs reach past the twelve dedicated inputs by using I/O pins as inputs, which `ioin14` … `ioin23` measured.
+
+| experiment | pin | terms | result | rows written | intact links |
+|---|---|---|---|---|---|
+| `cap23-8` | 23 | 8 | compiles | 1–9 | 88, 136, 184, 232, 280, 328, 376, 424 |
+| `cap23-9` | 23 | 9 | **refused** | — | — |
+| `cap19-16` | 19 | 16 | compiles | 49–65 | 2200 … 2726, then 2766, 2806, 2846, 2886 |
+| `cap19-17` | 19 | 17 | **refused** | — | — |
+| `cap14-8` | 14 | 8 | compiles | 122–130 | 5412, 5460, 5508, 5556, 5604, 5652, 5700, 5748 |
+| `cap14-9` | 14 | 9 | **refused** | — | — |
+
+**Row ownership, measured rather than cross-checked.** Each compiling design fills its block exactly: the first row of the block holds the output-enable term and carries no literal, every remaining row holds one, and nothing outside the block is written. Pin 23 gets rows 1–9, pin 19 gets 49–65, pin 14 gets 122–130 — the three blocks being both ends of the map and the widest one in the middle. That is the same answer Galette's tables give, now reached independently.
+
+The intact links land at one literal per row, ascending: `cap23-8` puts pins 1–8 at columns 0, 4, 8, 12, 16, 20, 24, 28, and `cap19-16` runs pins 1–11 across columns 0–40, pin 13 at 42, and then pins 14–17 at their **feedback** columns 38, 34, 30, 26 — the same columns the `fb*` and `ioin*` sweeps recorded, reached here by a design that simply needed more inputs than the part has dedicated ones.
+
+**The fit boundary.** Three pairs, each differing by one term. Eight fits on pin 23 and nine does not; sixteen fits on pin 19 and seventeen does not; eight fits on pin 14 and nine does not. Both eight-term ends are measured because the block map runs opposite to the pin numbering and widens toward the middle, so a boundary confirmed at one end says nothing about the other — the shape this document has already been wrong in once.
+
+What the refusal establishes is that the *compiler* will not place a ninth term, which is evidence about the part rather than proof: WinCUPL is one witness (see [Evidence level](#evidence-level)). It is, though, the strongest available statement short of hardware, and it agrees with two documents that were previously agreeing only with each other.
+
+Note also what row 10 is: pin 22's output-enable row, not spare. A ninth term on pin 23 would have to take another output's enable, which is why this is a capacity boundary and not an off-by-one.
+
+Experiments: `cap23-8`, `cap23-9`, `cap19-16`, `cap19-17`, `cap14-8`, `cap14-9`. The three that must fail declare `EXPECT refusal`, so a batch re-run reports them as results and fails loudly if the oracle ever accepts one — an acceptance would mean the block map is wrong.
 
 ## Architecture bits S0 and S1
 

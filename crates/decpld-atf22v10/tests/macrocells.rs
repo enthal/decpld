@@ -34,7 +34,9 @@ fn there_are_ten_macrocells_each_owning_its_pad_and_its_rows() {
     }
 
     // Datasheet Figure 1-1: "8 TO 16 PRODUCT TERMS", and the measured
-    // blocks give the distribution.
+    // blocks give the distribution. Three of the ten are measured
+    // directly by filling them — see `tests/capacity.rs`, which also
+    // measures the boundary one term past each.
     let capacities: Vec<usize> = cells.iter().map(|c| c.data_term_capacity()).collect();
     assert_eq!(capacities, [8, 10, 12, 14, 16, 16, 14, 12, 10, 8]);
 }

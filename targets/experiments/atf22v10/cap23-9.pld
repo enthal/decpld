@@ -1,0 +1,36 @@
+Name     cap23-9;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* EXPECT refusal
+
+   Nine independent product terms on pin 23, whose block owns one
+   output-enable row and eight data rows. A sum of nine distinct single
+   literals is already minimal SOP, so CUPL cannot merge them into
+   eight.
+
+   `cap23-8` is the same design one term smaller and compiles, which is
+   what makes this a measured boundary rather than a transcription of
+   the datasheet's Figure 1-1. run.sh reads the marker above, reports
+   the refusal as a result, and fails loudly if the oracle ever accepts
+   this design -- an acceptance would mean the block map is wrong.
+*/
+
+PIN 1 = i0;
+PIN 2 = i1;
+PIN 3 = i2;
+PIN 4 = i3;
+PIN 5 = i4;
+PIN 6 = i5;
+PIN 7 = i6;
+PIN 8 = i7;
+PIN 9 = i8;
+PIN 23 = o0;
+
+o0 = i0 # i1 # i2 # i3 # i4 # i5 # i6 # i7 # i8;

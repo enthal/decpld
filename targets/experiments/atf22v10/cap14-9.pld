@@ -1,0 +1,31 @@
+Name     cap14-9;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* EXPECT refusal
+
+   Nine independent product terms on pin 14. `cap14-8` compiles.
+
+   Pin 14 is the other eight-term end of the block map, and the map runs
+   opposite to the pin numbering, so confirming pin 23 does not confirm
+   pin 14.
+*/
+
+PIN 1 = i0;
+PIN 2 = i1;
+PIN 3 = i2;
+PIN 4 = i3;
+PIN 5 = i4;
+PIN 6 = i5;
+PIN 7 = i6;
+PIN 8 = i7;
+PIN 9 = i8;
+PIN 14 = o0;
+
+o0 = i0 # i1 # i2 # i3 # i4 # i5 # i6 # i7 # i8;
