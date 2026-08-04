@@ -37,7 +37,7 @@ M0 hardening, from the sub-agent reviews over the milestone's diff:
 - [x] Contradictory `F` and `G` fields refused rather than resolved by reading order — [#17](https://github.com/enthal/decpld/pull/17)
 - [x] JEDEC identifier tables re-transcribed with locators; reserved identifiers honoured — [#25](https://github.com/enthal/decpld/pull/25)
 - [x] Writer refuses unencodable content by the standard's `<field character>` class, and the parser reports it at an offset — [#25](https://github.com/enthal/decpld/pull/25)
-- [ ] A file with no `F` field no longer silently means `F0` — [#20](https://github.com/enthal/decpld/issues/20)
+- [x] A file with no `F` field no longer silently means `F0` — [#26](https://github.com/enthal/decpld/pull/26)
 - [x] `apply_fuse_list` applies atomically — [#25](https://github.com/enthal/decpld/pull/25)
 - [x] Fields with no identifier reported and preserved rather than silently deleted — [#25](https://github.com/enthal/decpld/pull/25)
 - [ ] SPEC.md sync and property-test coverage gaps — [#22](https://github.com/enthal/decpld/issues/22), [#23](https://github.com/enthal/decpld/issues/23)

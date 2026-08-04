@@ -1820,7 +1820,7 @@ pub struct JedecFile {
 }
 ```
 
-Two deviations from the original sketch, both deliberate:
+Three deviations from the original sketch, all deliberate:
 
 - `fuse_count` and `fuses: BitVec` are collapsed into one `FuseVector`, which owns the count. A `fuse_count` that disagrees with the length of the fuse data is not a state worth being able to represent.
 - `default_fuse` is an `Option`, not a `bool`. `None` means the file carried no `F` field, which JEDEC 3A permits only when every fuse state is stated explicitly — a different claim from "unlisted fuses are 0", and one the type must be able to hold. As a plain `bool` the parser zero-filled whatever the `L` fields did not reach, said nothing about it, and the writer then emitted the `F0*` that made the invention look deliberate. Same argument as `security` below: silence is not an instruction.
@@ -1830,7 +1830,7 @@ Two deviations from the original sketch, both deliberate:
 
 The `L` field's separator between fuse number and fuse states is **required**, not merely conventional. Fuse states are `0` and `1`, which are also decimal digits, so without the separator the field is ambiguous and must be rejected rather than guessed at.
 
-**A file with no `F` field must state every fuse.** JEDEC 3A: *"If no F field is specified, all fuse states must be defined."* This is checked, not assumed: the parser records which fuses each `L` field actually stated and refuses a file that leaves any unstated, naming how many and the first one. Zero-filling the gap would invent states the file never gave, and a device whose fuse map is 12 fuses' worth of guesswork is exactly the artifact this project exists not to produce.
+**A file with no `F` field must state every fuse.** JEDEC 3A: *"If no F field is specified, all fuse states must be defined after the QF field …"* This is checked, not assumed: the parser records which fuses each `L` field actually stated and refuses a file that leaves any unstated, naming how many and the first one. Zero-filling the gap would invent states the file never gave, and a device whose fuse map is 12 fuses' worth of guesswork is exactly the artifact this project exists not to produce.
 
 Coverage is tracked separately from `FuseVector` rather than as a flag on it. It is a fact about how a *file* was written, not about a device's fuse states, and a vector carrying it would have to exclude it from equality by hand — otherwise a parsed vector would compare unequal to an identical constructed one, breaking `jed diff` and every round-trip property.
 

@@ -32,6 +32,9 @@ pub const MISSING_FUSE_COUNT: DiagnosticCode = DiagnosticCode::new(3015);
 pub const AMBIGUOUS_FUSE_LIST: DiagnosticCode = DiagnosticCode::new(3016);
 /// `QF` declares more fuses than deCPLD will allocate for.
 pub const FUSE_COUNT_TOO_LARGE: DiagnosticCode = DiagnosticCode::new(3017);
+/// The file has no `F` field, so every fuse state must be given — and
+/// some were not. JEDEC 3A lines 376-377.
+pub const INCOMPLETE_FUSE_COVERAGE: DiagnosticCode = DiagnosticCode::new(3018);
 
 // ---- Checksums ----
 
@@ -72,9 +75,6 @@ pub const UNKNOWN_FIELD: DiagnosticCode = DiagnosticCode::new(3040);
 pub const FIELD_DISCARDED: DiagnosticCode = DiagnosticCode::new(3041);
 /// The file ends at ETX with no transmission checksum.
 pub const MISSING_TRANSMISSION_CHECKSUM: DiagnosticCode = DiagnosticCode::new(3042);
-/// The file has no `F` field, so every fuse state must be given — and
-/// some were not. JEDEC 3A line 376.
-pub const INCOMPLETE_FUSE_COVERAGE: DiagnosticCode = DiagnosticCode::new(3018);
 /// A character outside JEDEC 3A's `<field character>` class appeared
 /// inside a field. The writer cannot encode it, so the parser reports it
 /// where it can still be pointed at.

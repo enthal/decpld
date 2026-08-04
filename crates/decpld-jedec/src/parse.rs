@@ -313,7 +313,7 @@ pub fn parse_with_mode(
     }
 
     let has_fuse_data = fields.iter().any(|f| f.identifier == "L");
-    let Some((count, _)) = fuse_count else {
+    let Some((count, fuse_count_span)) = fuse_count else {
         if has_fuse_data {
             diagnostics
                 .push(Diagnostic::error(codes::MISSING_FUSE_COUNT, "no QF field").with_note(
@@ -349,7 +349,7 @@ pub fn parse_with_mode(
     }
 
     let mut fuses = FuseVector::new(count, default_fuse.unwrap_or(false));
-    let mut covered = FuseCoverage::new(count);
+    let mut covered = FuseCoverage::new(count, default_fuse.is_none());
     let mut notes = Vec::new();
     let mut security = None;
     let mut security_span: Option<TextRange> = None;
@@ -540,7 +540,11 @@ pub fn parse_with_mode(
                      (first is fuse {first})"
                 ),
             )
-            .with_note("JEDEC 3A: \"If no F field is specified, all fuse states must be defined\"")
+            .with_label(Label::primary(at(fuse_count_span), "this many fuses were declared"))
+            .with_note(
+                "JEDEC 3A: \"If no F field is specified, all fuse states must be defined \
+                 after the QF field …\"",
+            )
             .with_note("add an F0 or F1 field, or state the remaining fuses in an L field"),
         );
     }
@@ -852,15 +856,31 @@ pub(crate) fn split_identifier(field: &str) -> (&str, &str) {
 /// unequal to an identical constructed one, quietly breaking `diff` and
 /// every round-trip property.
 struct FuseCoverage {
+    /// Empty when coverage is not required, which is the common case.
     stated: Vec<bool>,
 }
 
 impl FuseCoverage {
-    fn new(count: u32) -> Self {
-        Self { stated: vec![false; count as usize] }
+    /// Track coverage only when it will actually be read.
+    ///
+    /// A file *with* an `F` field can never be short of coverage, so
+    /// allocating for it is pure waste — a byte per fuse, eight times the
+    /// `FuseVector` it shadows, and 8 MB at the `MAX_FUSES` ceiling that
+    /// exists precisely to stop malformed input allocating unbounded.
+    fn new(count: u32, required: bool) -> Self {
+        Self { stated: if required { vec![false; count as usize] } else { Vec::new() } }
     }
 
     fn state(&mut self, fuse: u32) {
+        // Callers range-check against the same vector before committing,
+        // so this cannot be out of range when tracking is on. Asserted
+        // rather than silently ignored: the failure direction is safe
+        // (an under-count rejects a good file, never accepts a bad one),
+        // but a silent miss would still be a bug worth catching.
+        debug_assert!(
+            self.stated.is_empty() || (fuse as usize) < self.stated.len(),
+            "fuse {fuse} is outside the coverage map"
+        );
         if let Some(slot) = self.stated.get_mut(fuse as usize) {
             *slot = true;
         }
@@ -1817,10 +1837,19 @@ mod second_review_findings {
         let mut fuses = FuseVector::new(8, false);
         let mut diagnostics = DiagnosticBundle::new();
 
-        let mut covered = FuseCoverage::new(8);
+        let mut covered = FuseCoverage::new(8, true);
         let outcome = apply_fuse_list(&field, &mut fuses, &mut covered, &mut diagnostics, FILE);
 
         assert!(outcome.is_err(), "a field with a bad state must be rejected");
+        // And it counts towards coverage as much as it wrote: nothing.
+        // Moving `covered.state(...)` up into the validation loop would
+        // still pass every other test on this branch, so the invariant
+        // the source comment claims needs stating here.
+        assert_eq!(
+            covered.first_unstated(),
+            Some(0),
+            "a rejected field must not count towards coverage"
+        );
         for fuse in 0..8 {
             assert_eq!(
                 fuses.get(fuse),
@@ -1842,8 +1871,9 @@ mod second_review_findings {
         let mut fuses = FuseVector::new(8, false);
         let mut diagnostics = DiagnosticBundle::new();
 
-        let mut covered = FuseCoverage::new(8);
+        let mut covered = FuseCoverage::new(8, true);
         assert!(apply_fuse_list(&field, &mut fuses, &mut covered, &mut diagnostics, FILE).is_ok());
+        assert_eq!(covered.first_unstated(), Some(4), "fuses 0..3 were stated, 4.. were not");
         let states: Vec<bool> = fuses.iter().collect();
         assert_eq!(states, [true, false, true, true, false, false, false, false]);
     }

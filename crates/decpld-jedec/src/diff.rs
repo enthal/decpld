@@ -187,6 +187,13 @@ mod tests {
             ("\x02h*QF8*F0*V1 X*\x030000", "\x02h*QF8*F0*\x030000", false),
             ("\x02one*QF8*F0*\x030000", "\x02two*QF8*F0*\x030000", false),
             ("\x02h*QF8*F0*G1*\x030000", "\x02h*QF8*F0*\x030000", false),
+            // `default_fuse` became an Option, so the agreement has to
+            // hold across all four pairings, not just the two it used
+            // to have. Silence and an explicit F0 describe different
+            // files even when every fuse ends up identical.
+            ("\x02h*QF8*L0 00000000*\x030000", "\x02h*QF8*F0*L0 00000000*\x030000", false),
+            ("\x02h*QF8*L0 00000000*\x030000", "\x02h*QF8*F1*L0 00000000*\x030000", false),
+            ("\x02h*QF8*L0 10110001*\x030000", "\x02h*QF8*L0 10110001*\x030000", true),
         ];
         for (left, right, same) in cases {
             let (a, b) = (file(left), file(right));
