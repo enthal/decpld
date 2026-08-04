@@ -162,6 +162,7 @@ dependencies = [
  "decpld-jedec",
  "decpld-logic",
  "decpld-report",
+ "insta",
  "serde_json",
  "thiserror",
 ]

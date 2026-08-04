@@ -2475,11 +2475,62 @@ Differing fuse counts suppress the fuse comparison entirely. Fuse *N* of a 16-fu
 
 `JedecDiff` and `JedecFile::describes_same_device_as` must agree on what "the same file" means. Two notions that disagreed would let `jed diff` bless a rewrite that silently deleted a device's test vectors, which is why unmodelled fields are compared here and not merely preserved.
 
-Classify each delta as matrix connection, mode, polarity, OE, architecture-wide mode, signature/checksum, or unknown.
+Classify each delta as matrix connection, mode, polarity, OE, architecture-wide mode, signature/checksum, or unknown. `decpld-device` answers, because that is the layer that owns fuse semantics:
+
+```rust
+pub enum FuseMeaning {
+    MatrixCell {
+        row: ProductTermId,
+        role: ProductTermRole,
+        input: BoolInputId,
+        polarity: Polarity,
+        source: PhysicalSignalSource,
+    },
+    ConfigField {
+        macrocell: Option<MacrocellId>,
+        field: &'static str,
+        id: ConfigFieldId,
+        bit: u32,
+    },
+    UserSignature { region: &'static str, byte: u32, bit: u32 },
+    SecurityFuse,
+    Other { region: &'static str, mutability: FuseMutability },
+    Unknown { fuse: FuseId },
+}
+
+pub fn classify_fuse(
+    fuse: FuseId,
+    matrix: &AndMatrixSpec,
+    specs: &[MacrocellSpec],
+    regions: &FuseRegions,
+) -> FuseMeaning;
+```
+
+**It introduces no device knowledge.** Everything it consults is already stated by an `AndMatrixSpec`, a `MacrocellSpec`, or a `FuseRegions`, so one implementation serves every target — a device model that describes itself gets classification for free, and there is no second table to drift from the first.
+
+**The matrix is consulted before the regions.** A region can only say "programmable"; the matrix knows which literal of which product term a cell carries, and that is the whole content of a matrix delta. Asking the coarser source first would discard the finer answer.
+
+`Unknown` is reported rather than guessed at. `oracle diff` and `jed inspect` both read files this compiler did not write, and inventing a meaning for an address outside the model is exactly the unevidenced guess §0.2.9 forbids. Every fuse *inside* the model must classify as something else, which is §4.7's "every fuse is classified" read through the classifier.
+
+`AndMatrixSpec::position_of_fuse` is the inverse of the cell grid — the lookup that turns "fuse 52 changed" into "row 1, column 8". It is built from the same pass that rejects a fuse used twice, so it cannot disagree with the cells it indexes.
 
 ```bash
 decpld oracle diff baseline.jed changed.jed --device ATF22V10C
 ```
+
+`--device` is required for the same reason `jed inspect` requires it (§8.2): a JEDEC file does not say what part it is for. **Both** files are checked against it, not only the first — classifying a foreign file's fuses against this device's map would describe it as a part it is not, and the second argument is where that is easiest to miss.
+
+Deltas are **grouped by category**, with a count per category ahead of the detail. A single varied literal produces one or two deltas in one category; a changed macrocell produces dozens across several — and which groups appear at all is usually the finding an experiment is looking for.
+
+**The design-specification header is summarised, never printed.** WinCUPL's banner carries a timestamp, the design's name, and the installation's *serial number*: it differs between any two runs, would bury the fuse findings, and is the one part of an oracle result that must not be redistributed (§7.2). `jed diff` prints the text for anyone who wants it.
+
+Exit codes follow §8.2.1 as `jed diff` does: a difference is a **finding**, an unreadable or foreign file is **trouble**. An oracle session is scripted over dozens of experiments, so "these files differ" has to be distinguishable from "I could not read that file".
+
+**Two files must be the same footprint, not merely both this device.** The ATF22V10C has three fuse counts (§4.7), and fuse *N* of a 5828-fuse PAL-mode file is not fuse *N* of a 5892-fuse GAL-mode one. Comparing across them leaves nothing comparable, which a reader would see as "no fuse changed" — a wrong answer where a refusal was available.
+
+**No free-text field is printed, only counted.** Not the design specification, not notes, not the bodies of unmodelled fields. A `.pld` author can put anything in an `N` note and an unmodelled field is reproduced identifier *and* body, so restricting the rule to the header would leave two other paths open. Line counts are reported as "*n* of *m* differ" or "*m* lines → *n*": a positional comparison counts every line after an inserted one as changed, and WinCUPL headers routinely differ by a present-or-absent line.
+
+`counts_by_category` is a **method**, not a field. Stored beside the deltas the two could disagree, and `render` walks the categories to group its output — so a stale map would drop a category's deltas from the body while the header still counted them.
 
 A mapping becomes verified only when multiple independent fixtures agree, invariants hold, encode/decode round-trips, and preferably hardware testing succeeds.
 
@@ -2657,6 +2708,7 @@ decpld jed canonicalize input.jed -o output.jed --style canonical|compact
 decpld jed diff a.jed b.jed
 
 decpld oracle env
+decpld oracle diff before.jed after.jed --device ATF22V10C
 decpld oracle compile fixture.pld --out-dir result/
 decpld oracle generate-suite --device ATF22V10C
 decpld oracle analyze-suite targets/fixtures/atf22v10
@@ -2676,7 +2728,7 @@ The code joining §6.2's parser, §4.7's device model, and §6.3's report lives 
 
 ### 8.2.1 Exit codes
 
-The `jed` commands follow `diff(1)`, so they compose into scripts:
+The `jed` commands and `oracle diff` follow `diff(1)`, so they compose into scripts:
 
 | Code | Meaning |
 | --- | --- |

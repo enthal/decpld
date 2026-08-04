@@ -10,6 +10,7 @@
 //! where it can be tested without spawning a process.
 
 mod inspect;
+mod oracle;
 mod render;
 
 use std::path::{Path, PathBuf};
@@ -41,6 +42,26 @@ enum Command {
     /// Inspect and manipulate JEDEC files
     #[command(subcommand)]
     Jed(JedCommand),
+
+    /// Developer tools for the WinCUPL oracle
+    ///
+    /// These support reverse-engineering a device's fuse map. They are
+    /// never part of compiling: deCPLD must never require WinCUPL,
+    /// Wine, or Windows (SPEC.md §7.1).
+    #[command(subcommand)]
+    Oracle(OracleCommand),
+}
+
+#[derive(Subcommand)]
+enum OracleCommand {
+    /// Compare two JEDEC files and say what each changed fuse controls
+    Diff {
+        before: PathBuf,
+        after: PathBuf,
+        /// Which part the files are for
+        #[arg(long, value_enum)]
+        device: DeviceArg,
+    },
 }
 
 #[derive(Subcommand)]
@@ -167,6 +188,9 @@ fn main() -> ExitCode {
         Command::Jed(JedCommand::Diff { before, after }) => diff(&before, &after),
         Command::Jed(JedCommand::Inspect { file, device, package, json }) => {
             inspect_command(&file, device.into(), package.as_deref(), json)
+        }
+        Command::Oracle(OracleCommand::Diff { before, after, device }) => {
+            oracle_diff(&before, &after, device.into())
         }
     };
 
@@ -318,6 +342,39 @@ fn inspect_command(
     // either states a true checksum or states none. A check here could
     // only fire on the second case, where there is nothing to report.
     Ok(OK)
+}
+
+fn oracle_diff(before: &Path, after: &Path, device: Device) -> Result<u8, Failure> {
+    let (left_source, right_source) = (read(before)?, read(after)?);
+    let (left_name, right_name) = (before.display().to_string(), after.display().to_string());
+
+    let parse_one = |source: &str, name: &str| {
+        let result = parse_with_mode(source, FileId(0), ParserMode::PreserveUnknown);
+        let bundle = match &result {
+            Ok(parsed) => &parsed.diagnostics,
+            Err(bundle) => bundle,
+        };
+        eprint!("{}", render::bundle(bundle, name, source));
+        result.map_err(|_| Failure::trouble(format!("{name}: not a valid JEDEC file")))
+    };
+
+    let left = parse_one(&left_source, &left_name)?.file;
+    let right = parse_one(&right_source, &right_name)?.file;
+
+    let delta = oracle::diff(&left, &right, device)
+        .map_err(|e| Failure::trouble(format!("{left_name} and {right_name}: {e}")))?;
+
+    // Same exit-code contract as `jed diff` (SPEC.md §8.2.1): a
+    // difference is a finding, not trouble. An oracle run is scripted
+    // over dozens of experiments, and "these files differ" has to be
+    // distinguishable from "I could not read that file".
+    if delta.is_empty() {
+        println!("{left_name} and {right_name} describe the same device");
+        return Ok(OK);
+    }
+
+    print!("{}", oracle::render(&delta, &left_name, &right_name));
+    Ok(FINDINGS)
 }
 
 /// One-line summary of a file that parsed. Pure, so it is testable
