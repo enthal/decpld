@@ -352,9 +352,15 @@ pub const SYNCHRONOUS_PRESET_ROW: u32 = 131;
 /// A macrocell's rows in the AND array.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowBlock {
-    /// The output-enable product term. Evidence: in every measured
-    /// design this row is entirely blown — a no-literal product term,
-    /// i.e. permanently enabled.
+    /// The output-enable product term.
+    ///
+    /// Evidence: it is entirely blown — a no-literal product term, so
+    /// permanently enabled — in every design that does not write an
+    /// `.oe`, which is what identified the row. When a design does
+    /// write one, the row carries that expression like any other:
+    /// `oe-var` puts pin 3's true column in it, `oe-var-not` the
+    /// complement, and `oe-never` leaves all 44 links intact, which is
+    /// constantly false and holds the pin off.
     pub output_enable_row: u32,
     /// The data product terms, 8 to 16 of them.
     pub data_rows: std::ops::Range<u32>,

@@ -137,9 +137,65 @@ fn the_two_empty_enable_states_are_opposites_at_the_same_44_fuses() {
         assert_eq!(always.get(FuseId(fuse)), Some(true), "always: {fuse}");
         assert_eq!(never.get(FuseId(fuse)), Some(false), "never: {fuse}");
     }
-    // And nothing outside the enable row distinguishes them.
-    for fuse in (0..44).chain(88..5808) {
+    // And nothing outside the enable row distinguishes them, across the
+    // WHOLE map rather than the array alone. This is the property the
+    // oracle measured — `oe-never` differs from `in2` in the enable row
+    // and in nothing else — and stopping at 5808 would exclude the
+    // architecture region, which is exactly where a plausible wrong
+    // encoder would put its difference: "a pad nobody drives is active
+    // low, the way WinCUPL leaves an undriven cell" passes every other
+    // test in this file.
+    let footprint_end = Footprint::Gal.fuse_count();
+    for fuse in (0..44).chain(88..footprint_end) {
         assert_eq!(always.get(FuseId(fuse)), never.get(FuseId(fuse)), "fuse {fuse}");
+    }
+}
+
+#[test]
+fn a_disabled_pad_keeps_the_architecture_bits_its_enabled_twin_has() {
+    // The measurement the whole "the enable row is the mechanism"
+    // reading rests on, asserted at absolute addresses.
+    //
+    // In all four `oe-*` runs the architecture region is identical:
+    // 5808 and 5809 blown, 5810–5827 intact — pin 23 active high and
+    // combinational even when its output is permanently off. Had
+    // WinCUPL instead written S0 clear, S1 set (what `ioin14` … `ioin23`
+    // leave an undriven cell at), `oe-never` would be
+    // configuration-identical to those designs, two variables would
+    // have moved together, and it could not resolve a confound it
+    // shared with them.
+    for enable in [Some(Cube::always()), Some(Cube::new([literal(3, Polarity::True)])), None] {
+        let fuses = encode_design(&design_with_enable(enable), Footprint::Gal).expect("ok");
+        assert_eq!(fuses.get(FuseId(5808)), Some(true), "S0: pin 23 active high");
+        assert_eq!(fuses.get(FuseId(5809)), Some(true), "S1: pin 23 combinational");
+    }
+
+    // Those three assertions cannot by themselves say that 5808/5809 is
+    // *pin 23's* pair: every macrocell in these designs is
+    // combinational and active high, so all twenty architecture fuses
+    // read 1 and the pair order is unobservable. `arch-comb-low`
+    // locates it — the discriminating corner, checked in
+    // `tests/macrocells.rs` — and this makes the same distinction here,
+    // so a reader of this file is not left with a claim its own
+    // assertions do not support.
+    //
+    // Pin 23 active low with the enable row off: S0 must clear at 5808
+    // and nowhere else, and S1 must stay set. Under pin-ASCENDING pair
+    // order the change would land at 5826 instead.
+    let mut design = design_with_enable(None);
+    let macrocell = G.macrocell_of_pin(PinNumber(23)).expect("an I/O pin");
+    design
+        .macrocells
+        .iter_mut()
+        .find(|cell| cell.id == MacrocellId(macrocell.0))
+        .expect("present")
+        .polarity = OutputPolarity::ActiveLow;
+
+    let fuses = encode_design(&design, Footprint::Gal).expect("ok");
+    assert_eq!(fuses.get(FuseId(5808)), Some(false), "pin 23's S0 is the FIRST pair, not the last");
+    assert_eq!(fuses.get(FuseId(5809)), Some(true), "and its S1 is unchanged");
+    for fuse in 5810..5828 {
+        assert_eq!(fuses.get(FuseId(fuse)), Some(true), "no other pair moved: {fuse}");
     }
 }
 

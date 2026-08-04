@@ -106,7 +106,7 @@ All 22 sources are accounted for: even sources 0–20 are input pins 1–11, odd
 
 ## Rows: macrocell blocks
 
-A design driving pin 23 uses rows 1–9; one driving pin 22 uses rows 10–20. Within a block the **first row is the output-enable term** (it appears as all-blown, a no-literal product term, i.e. permanently enabled) and the rest are data terms.
+A design driving pin 23 uses rows 1–9; one driving pin 22 uses rows 10–20. Within a block the **first row is the output-enable term** and the rest are data terms. It appears all-blown — a no-literal product term, permanently enabled — in every design that does not write an `.oe`, which is what identified it; [Output enable](#output-enable) measures what the row holds when a design does write one.
 
 This matches Galette's `OLMC_ROWS_22V10 = [122,111,98,83,66,49,34,21,10,1]` and `OLMC_SIZE_22V10 = [9,11,13,15,17,17,15,13,11,9]` under
 
@@ -238,15 +238,19 @@ The marker sits inside a CUPL comment. `marker-inert` is `in2` carrying the same
 
 ## Output enable
 
-SPEC.md §7.4's output-enable experiments. Four designs on pin 23, differing **only** in the enable expression, with the data term `o0 = i0` (pin 2) held constant throughout. Pin 23's block is rows 1 and 2: row 1 is the enable row, fuses 44–87; row 2 is its first data row, 88–131.
+SPEC.md §7.4's output-enable experiments. Four designs on pin 23, differing only in the enable expression — and, for the two needing a control signal, in declaring `PIN 3 = e` — with the data term `o0 = i0` (pin 2) held constant throughout. Pin 23's block is rows 1–9; the two rows in play here are row 1, the enable row at fuses 44–87, and row 2, its first data row at 88–131.
 
-| experiment | `.oe` | array blown | enable row |
-|---|---|---|---|
-| `in2` | *not written* | 44–91, 93–131 | 44–87 entirely blown |
-| `oe-always` | `'b'1` | 44–91, 93–131 | 44–87 entirely blown |
-| `oe-var` | `e` (pin 3) | 44–51, 53–91, 93–131 | intact at 52 |
-| `oe-var-not` | `!e` | 44–52, 54–91, 93–131 | intact at 53 |
-| `oe-never` | `'b'0` | 88–91, 93–131 | 44–87 entirely **intact** |
+| experiment | `.oe` | array blown | enable row | pin 23's S0, S1 |
+|---|---|---|---|---|
+| `in2` | *not written* | 44–91, 93–131 | 44–87 entirely blown | 1, 1 |
+| `oe-always` | `'b'1` | 44–91, 93–131 | 44–87 entirely blown | 1, 1 |
+| `oe-var` | `e` (pin 3) | 44–51, 53–91, 93–131 | intact at 52 | 1, 1 |
+| `oe-var-not` | `!e` | 44–52, 54–91, 93–131 | intact at 53 | 1, 1 |
+| `oe-never` | `'b'0` | 88–91, 93–131 | 44–87 entirely **intact** | 1, 1 |
+
+**The architecture column is the load-bearing one**, and it is measured rather than assumed. All four designs write the identical architecture region: 5808 and 5809 blown, 5810–5827 intact. Pin 23's pair reads 1, 1 — active high, combinational — in every one of them, including the design whose output is permanently off; the other nine macrocells read 0, 0 throughout.
+
+Without that column the experiment would not do the job it is here for. `ioin14` … `ioin23` leave an undriven cell at S0 clear, S1 set. Had `oe-never` done the same it would be configuration-identical to those designs, two variables would have moved together, and it could not resolve a confound it shared. It does not: `oe-never` differs from `in2` in the enable row and in nothing else, across all 5892 fuses.
 
 Four findings, in increasing order of consequence.
 
@@ -256,9 +260,15 @@ Four findings, in increasing order of consequence.
 
 **Complement is true + 1 there too.** `oe-var-not` moves the intact link to 53, column 9. The pair is what establishes the sense: one design alone leaves a single intact link consistent with either polarity until a second design moves it.
 
-**A permanently disabled pad is the enable row entirely intact.** `oe-never` leaves all 44 links of row 1 connected — every literal at both polarities, which no input can satisfy — while row 2 keeps its data term unchanged. This is the finding the `ioin*` experiments could only guess at: it varies the enable *without* touching the architecture bits, so the enable row is demonstrably the mechanism that holds a pin off. Note which row moved, too: a compiler expressing "off" by emptying the data term would have moved row 2 instead.
+**A permanently disabled pad is the enable row entirely intact.** `oe-never` leaves all 44 links of row 1 connected — every literal at both polarities, which no input can satisfy — while row 2 keeps its data term and the architecture bits keep the values `in2` gives them. One variable moved. Note which row moved, too: a compiler expressing "off" by emptying the data term would have moved row 2 instead.
 
 The two states are therefore opposites at the same 44 fuses, and getting them the wrong way round turns every undriven pin into a permanently driven one.
+
+**What this establishes, stated precisely.** It is a measurement of the *encoding*: asked for an output that is never enabled, the oracle writes an all-intact enable row and changes nothing else. That the product term is what physically gates the pad is the reading of that encoding, not a separate measurement — the [Evidence level](#evidence-level) caveat governs it like everything else here, nothing in this document is `HardwareVerified`, and WinCUPL is one witness rather than an authority.
+
+One residual dependency is worth naming. Treating a permanently disabled output as *the same silicon state* as an input-only pin also requires feedback to be taken at the **pad** rather than at an internal node. Were it internal, an input-only cell would read back its own never-true data row instead of the external pin, and the two would not be the same thing at all. `oe-bidir` below shows WinCUPL routing a gated pin's readback through the feedback column, which is consistent with a pad tap without proving one, and the `fb*` and `ioin*` sweeps landing on one column is the same kind of evidence.
+
+Note in passing that `in2` and `oe-always` carry different `Name` fields and are still bit-identical, so `Name` reaches no fuse — unlike `PartNo`, which [the user signature](#the-user-signature-carries-cupls-partno) records as landing in the signature region.
 
 ### Bidirectional readback uses the feedback column
 
@@ -274,6 +284,8 @@ Experiment `oe-bidir`: pin 23 is driven when `e` is high and read into pin 22 th
 Column 2 is both what the `fb*` sweep recorded for pin 23's **feedback** and what `ioin23` recorded for pin 23 as an undriven **input**. Measured separately, they are one path used in both directions — which is why a pad has no input resource of its own in the model.
 
 Pin 22's architecture pair reads S0 = 1, S1 = 1 (fuses 5810 and 5811 blown), combinational and active high, as expected for `o1 = io0`.
+
+These runs also extend [Columns: signal sources](#columns-signal-sources) in a direction it had not reached. `oe-var` places column 8 in **row 1** and `oe-var-not` places **column 9** there — the first measurement of any column in an output-enable row, and the first of a *complement* column outside pin 23's first data row.
 
 Experiments: `oe-always`, `oe-var`, `oe-var-not`, `oe-never`, `oe-bidir`. All five compile; none needs an `EXPECT refusal` marker.
 
