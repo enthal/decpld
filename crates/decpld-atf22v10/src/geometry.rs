@@ -16,8 +16,17 @@ pub const ROWS: u32 = 132;
 
 /// Columns in the AND array: 22 signal sources × 2 senses.
 ///
-/// Evidence: Galette `src/chips.rs:84`, and measured — the highest
-/// column observed is 43 (`nc13`, the complement of pin 13).
+/// Evidence: measured as the width of a single product term, from
+/// absolute fuse addresses — see `targets/evidence/atf22v10-fuse-map.md`,
+/// "Fuse addressing". Five two-term designs write the same 88-fuse
+/// extent while their one literal moves between address 88 (`in1`) and
+/// address 131 (`nc13`), so a term spans at least 44 addresses and two
+/// terms in 88 fuses makes it exactly 44. Cross-checked against Galette
+/// `src/chips.rs:84`.
+///
+/// An earlier citation here read "the highest column observed is 43",
+/// which is a residue mod 44 and so presupposed the stride it was
+/// offered as evidence for.
 pub const COLUMNS: u32 = 44;
 
 /// The array's two dimensions and its fuse count are cited separately —
@@ -27,6 +36,23 @@ pub const COLUMNS: u32 = 44;
 /// runtime; here it is a compile error.
 const _: () = assert!(ROWS * COLUMNS == crate::regions::ARRAY_FUSES);
 
+/// One link in the AND array: where a signal column crosses a
+/// product-term row.
+///
+/// A named struct rather than a `(u32, u32)` pair. Both coordinates are
+/// small unsigned integers, so a transposed pair is not a type error and
+/// not obviously wrong at a glance — it produces a perfectly plausible
+/// fuse address in the wrong place, which on this device means a
+/// programmed part that misbehaves in a circuit. Named fields make the
+/// swap a compile error instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ArrayCell {
+    /// A product term, 0..[`ROWS`].
+    pub row: u32,
+    /// A signal sense, 0..[`COLUMNS`]. See [`SignalSource::true_column`].
+    pub column: u32,
+}
+
 /// A DIP-24 pin number.
 ///
 /// PROVISIONAL. SPEC.md §4.6 makes `PinNumber` a device-layer type — the
@@ -34,8 +60,11 @@ const _: () = assert!(ROWS * COLUMNS == crate::regions::ARRAY_FUSES);
 /// project-wide newtypes. It lives here only until `decpld-device` grows
 /// the package model, at which point this moves and this crate imports
 /// it. Same for [`MacrocellIndex`], which SPEC calls `MacrocellId`, and
-/// for the bare `u32` columns, which SPEC.md §4.4 types as
-/// `MatrixColumn`.
+/// for [`ArrayCell`]'s bare `u32` fields: SPEC.md §4.4 types a column as
+/// `MatrixColumn`, and a row is a product-term index, which CLAUDE.md
+/// lists as `ProductTermId`. The named struct stops the two coordinates
+/// being swapped at a call site; it does not stop either being confused
+/// with some other integer, and only newtypes will.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PinNumber(pub u8);
 
@@ -121,6 +150,58 @@ const INPUT_PINS: [(u8, u8); 12] = [
 impl Atf22v10Geometry {
     /// The number of macrocells. Datasheet Figure 1-1: "10 I/O PINS".
     pub const MACROCELLS: u8 = 10;
+
+    /// The fuse carrying an array cell, or `None` if the cell is outside
+    /// the array.
+    ///
+    /// **The array is row-major with a stride of [`COLUMNS`]**: cell
+    /// (*r*, *c*) is fuse 44*r* + *c*, and row *r* occupies the
+    /// contiguous run 44*r*..44*r*+44.
+    ///
+    /// Evidence: measured, in absolute fuse addresses with nothing
+    /// divided by 44 — see `targets/evidence/atf22v10-fuse-map.md`,
+    /// "Fuse addressing", which records the blown extents of eight
+    /// designs and the argument they support. The table is deliberately
+    /// *not* repeated here: a fuse layout fact stated in two places is
+    /// one that will drift, and the document is where the reasoning
+    /// lives.
+    ///
+    /// In outline, from absolute addresses and a count of product terms
+    /// read off the source text: five two-term designs write the same
+    /// 88-fuse extent while their single literal moves between address
+    /// 88 and address 131, so one product term is 44 fuses wide; every
+    /// design's extent begins on a multiple of 44 and is a whole number
+    /// of 44s; and one pin's literal placed in different terms lands at
+    /// addresses differing by an exact multiple of 44, so a pin holds
+    /// the same offset in every term.
+    ///
+    /// This relation was previously assumed rather than stated. Every
+    /// earlier experiment was read by dividing a fuse address by 44,
+    /// which makes the row/column view a *consequence* of the formula
+    /// and useless as evidence for it — so it was measured again from
+    /// addresses. Galette and GALasm agree on row·44 + column, which
+    /// makes it `OpenSourceCrossChecked` too.
+    #[must_use]
+    pub fn fuse_of(self, cell: ArrayCell) -> Option<FuseId> {
+        // The closure is load-bearing, though not for the reason it
+        // looks like: `then_some` would evaluate the multiply before the
+        // bounds check, so a caller passing a computed row near
+        // `u32::MAX` gets a debug-build overflow panic. The *answer*
+        // would still be `None` either way — the guard gates the result,
+        // not the arithmetic — so this is a crash, never a wrong fuse.
+        // Clippy does not suggest `then_some` here for that reason, and
+        // it should not be "simplified" into one.
+        (cell.row < ROWS && cell.column < COLUMNS).then(|| FuseId(cell.row * COLUMNS + cell.column))
+    }
+
+    /// The array cell a fuse carries, or `None` if the fuse is outside
+    /// the array — the architecture, signature, and power-down fuses all
+    /// return `None` rather than an out-of-range row.
+    #[must_use]
+    pub fn cell_of(self, fuse: FuseId) -> Option<ArrayCell> {
+        (fuse.0 < ROWS * COLUMNS)
+            .then_some(ArrayCell { row: fuse.0 / COLUMNS, column: fuse.0 % COLUMNS })
+    }
 
     /// The pin a macrocell drives.
     ///
@@ -256,6 +337,23 @@ pub struct RowBlock {
     pub output_enable_row: u32,
     /// The data product terms, 8 to 16 of them.
     pub data_rows: std::ops::Range<u32>,
+}
+
+impl RowBlock {
+    /// The last data row, or `None` if the block has none.
+    ///
+    /// Exists so callers do not write `data_rows.end - 1`. Every block
+    /// this device defines has at least eight data terms, so the
+    /// subtraction cannot underflow today — but `data_rows` is a public
+    /// `Range`, and the first caller to reach for its last element
+    /// teaches every later one how it is done. A device model with an
+    /// empty block is not obviously impossible, and the difference
+    /// between `None` and a wrapped `u32::MAX` row is the difference
+    /// between a rejected build and a fuse address in another region.
+    #[must_use]
+    pub fn last_data_row(&self) -> Option<u32> {
+        (self.data_rows.end > self.data_rows.start).then(|| self.data_rows.end - 1)
+    }
 }
 
 /// A macrocell's two architecture fuses.

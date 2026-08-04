@@ -298,3 +298,256 @@ fn out_of_range_lookups_return_none_rather_than_panicking() {
         assert!(G.macrocell_pin(MacrocellIndex(index)).is_none(), "macrocell {index}");
     }
 }
+
+#[test]
+fn the_oracle_put_its_literals_where_row_major_addressing_says() {
+    // The array's fuse addressing was, until this test, the one thing
+    // the crate relied on and never stated: every experiment was read as
+    // "row r, column c" by dividing the fuse address by 44, so the
+    // row/column view could not be evidence for the formula that
+    // produced it.
+    //
+    // These expectations are absolute fuse addresses, read straight out
+    // of oracle output with no decomposition applied. The reasoning is
+    // in `targets/evidence/atf22v10-fuse-map.md`, "Fuse addressing".
+    //
+    // Fuse 92 is the ANCHOR, not an agreement: it is where `in2`'s own
+    // literal lands, and column 4 was read off that very address, so
+    // "92 = 44*2 + 4" is an identity. The evidence is the other four,
+    // which place a literal for a pin whose column is already known
+    // into a DIFFERENT product term and find it at an address
+    // differing by an exact multiple of 44:
+    //
+    //   pin 3   96 (in3) vs 8 (global-ar-sp AR)      diff 88   = 2 * 44
+    //   pin 4   100 (in4) vs 5776 (global-ar-sp SP)  diff 5676 = 129 * 44
+    //   pin 2   92 (in2) vs 2204 (mc19)              diff 2112 = 48 * 44
+    //   pin 2   92 (in2) vs 5416 (mc14)              diff 5324 = 121 * 44
+    let expected: [(u32, u32, u32, &str); 5] = [
+        // The asynchronous-reset row, driven from pin 3 (column 8).
+        (0, 8, 8, "global-ar-sp"),
+        // Pin 23's first data row, driven from pin 2 (column 4).
+        (2, 4, 92, "global-ar-sp"),
+        // The synchronous-preset row, driven from pin 4 (column 12).
+        (131, 12, 5776, "global-ar-sp"),
+        // Pin 14's first data row — the far end of the array.
+        (123, 4, 5416, "mc14"),
+        // Pin 19's first data row — the middle.
+        (50, 4, 2204, "mc19"),
+    ];
+    for (row, column, fuse, experiment) in expected {
+        assert_eq!(
+            G.fuse_of(ArrayCell { row, column }),
+            Some(FuseId(fuse)),
+            "row {row} column {column} ({experiment})"
+        );
+        assert_eq!(
+            G.cell_of(FuseId(fuse)),
+            Some(ArrayCell { row, column }),
+            "fuse {fuse} ({experiment})"
+        );
+    }
+}
+
+#[test]
+fn every_row_block_starts_on_the_fuse_the_oracle_wrote_first() {
+    // The row numbers are measured; this checks that turning one into a
+    // fuse address reproduces the address the oracle actually wrote, for
+    // the three macrocells where a blown span pins it exactly.
+    for (pin, first_fuse, experiment) in
+        [(23u8, 44u32, "global-ar-sp"), (19, 2156, "mc19"), (14, 5368, "mc14")]
+    {
+        let macrocell = G.macrocell_of_pin(PinNumber(pin)).expect("an I/O pin");
+        let block = G.row_block(macrocell).expect("a measured block");
+        assert_eq!(
+            G.fuse_of(ArrayCell { row: block.output_enable_row, column: 0 }),
+            Some(FuseId(first_fuse)),
+            "pin {pin} ({experiment})"
+        );
+    }
+}
+
+#[test]
+fn addressing_round_trips_over_the_whole_array() {
+    // Exhaustive rather than sampled: 5808 fuses is cheap, and a
+    // boundary that folds two cells onto one fuse is invisible in a spot
+    // check. This is the invariant SPEC.md §4.7 states as "matrix cells
+    // map one-to-one to fuses", asserted in both directions.
+    let mut seen = vec![false; (ROWS * COLUMNS) as usize];
+    for row in 0..ROWS {
+        for column in 0..COLUMNS {
+            let cell = ArrayCell { row, column };
+            let fuse = G.fuse_of(cell).unwrap_or_else(|| panic!("{cell:?} has no fuse"));
+            assert!(fuse.0 < ROWS * COLUMNS, "{cell:?} escaped the array at {fuse:?}");
+            assert!(!seen[fuse.0 as usize], "{cell:?} collided at {fuse:?}");
+            seen[fuse.0 as usize] = true;
+            assert_eq!(G.cell_of(fuse), Some(cell));
+        }
+    }
+    assert!(seen.iter().all(|hit| *hit), "some array fuse belongs to no cell");
+}
+
+#[test]
+fn addresses_outside_the_array_are_rejected_rather_than_wrapped() {
+    // A fitter reaches these with computed indices, and the failure to
+    // avoid is a row past the end quietly aliasing onto the next
+    // region's fuses — which for row 132 would be the architecture bits.
+    for cell in [
+        ArrayCell { row: ROWS, column: 0 },
+        ArrayCell { row: 0, column: COLUMNS },
+        ArrayCell { row: ROWS, column: COLUMNS },
+        ArrayCell { row: u32::MAX, column: u32::MAX },
+    ] {
+        assert!(G.fuse_of(cell).is_none(), "{cell:?}");
+    }
+    for fuse in [ROWS * COLUMNS, 5828, 5892, u32::MAX] {
+        assert!(G.cell_of(FuseId(fuse)).is_none(), "fuse {fuse} is not in the array");
+    }
+}
+
+#[test]
+fn the_evidence_documents_summary_table_is_arithmetically_right() {
+    // `targets/evidence/atf22v10-fuse-map.md` ends with a summary
+    // collecting every measurement into fuse order: each macrocell
+    // block as a fuse range, the column map, the architecture pairs,
+    // the signature bytes. Those ranges are arithmetic over the
+    // measured row and column numbers, not further measurements.
+    //
+    // A summary table nobody checks is where a transcription error
+    // lives indefinitely, read as authoritative precisely because it is
+    // convenient. So the numbers below are transcribed from the
+    // document and re-derived from the model here, and the two must
+    // agree.
+    let blocks: [(u8, u32, u32); 10] = [
+        (23, 44, 439),
+        (22, 440, 923),
+        (21, 924, 1495),
+        (20, 1496, 2155),
+        (19, 2156, 2903),
+        (18, 2904, 3651),
+        (17, 3652, 4311),
+        (16, 4312, 4883),
+        (15, 4884, 5367),
+        (14, 5368, 5763),
+    ];
+    for (pin, first, last) in blocks {
+        let macrocell = G.macrocell_of_pin(PinNumber(pin)).expect("an I/O pin");
+        let block = G.row_block(macrocell).expect("a measured block");
+        assert_eq!(
+            G.fuse_of(ArrayCell { row: block.output_enable_row, column: 0 }),
+            Some(FuseId(first)),
+            "pin {pin} block start"
+        );
+        assert_eq!(
+            G.fuse_of(ArrayCell {
+                row: block.last_data_row().expect("a block with data terms"),
+                column: COLUMNS - 1,
+            }),
+            Some(FuseId(last)),
+            "pin {pin} block end"
+        );
+    }
+
+    // The column table, transcribed the same way. Input pins and
+    // feedback sources alternate for the first 20 columns and then stop
+    // alternating, so a cell copied one position out of line reads as
+    // perfectly ordinary.
+    let columns: [(u32, Option<u8>, Option<u8>); 22] = [
+        (0, Some(1), None),
+        (2, None, Some(23)),
+        (4, Some(2), None),
+        (6, None, Some(22)),
+        (8, Some(3), None),
+        (10, None, Some(21)),
+        (12, Some(4), None),
+        (14, None, Some(20)),
+        (16, Some(5), None),
+        (18, None, Some(19)),
+        (20, Some(6), None),
+        (22, None, Some(18)),
+        (24, Some(7), None),
+        (26, None, Some(17)),
+        (28, Some(8), None),
+        (30, None, Some(16)),
+        (32, Some(9), None),
+        (34, None, Some(15)),
+        (36, Some(10), None),
+        (38, None, Some(14)),
+        (40, Some(11), None),
+        (42, Some(13), None),
+    ];
+    for (column, input_pin, feedback_pin) in columns {
+        let source = G
+            .sources()
+            .find(|s| s.true_column() == column)
+            .unwrap_or_else(|| panic!("no source at column {column}"));
+        let expected = match (input_pin, feedback_pin) {
+            (Some(pin), None) => SourceKind::Input(PinNumber(pin)),
+            (None, Some(pin)) => {
+                SourceKind::Feedback(G.macrocell_of_pin(PinNumber(pin)).expect("an I/O pin"))
+            }
+            _ => panic!("column {column} claims to be both or neither"),
+        };
+        assert_eq!(source.kind, expected, "column {column}");
+    }
+
+    // The signature byte table: byte b is fuses 5828+8b ..= 5835+8b.
+    // The only summary cell with nothing else pinning it, and the eight
+    // ranges must tile the signature region exactly — a byte boundary
+    // off by one silently rewrites the PartNo text.
+    let signature: [(u32, u32, u32); 8] = [
+        (0, 5828, 5835),
+        (1, 5836, 5843),
+        (2, 5844, 5851),
+        (3, 5852, 5859),
+        (4, 5860, 5867),
+        (5, 5868, 5875),
+        (6, 5876, 5883),
+        (7, 5884, 5891),
+    ];
+    let region = regions_for(Footprint::Gal).expect("a valid layout");
+    let signature_region = region
+        .iter()
+        .find(|r| r.mutability == FuseMutability::UserSignature)
+        .expect("GAL mode has a signature");
+    let mut covered =
+        vec![false; (signature_region.range.end - signature_region.range.start) as usize];
+    for (byte, first, last) in signature {
+        assert_eq!(signature_region.range.start + byte * 8, first, "byte {byte} start");
+        assert_eq!(first + 7, last, "byte {byte} is eight fuses");
+        for fuse in first..=last {
+            let offset = (fuse - signature_region.range.start) as usize;
+            assert!(!covered[offset], "fuse {fuse} is in two bytes");
+            covered[offset] = true;
+        }
+    }
+    assert!(covered.iter().all(|hit| *hit), "the eight bytes do not tile the signature region");
+
+    // The two device-wide control rows bracket the array.
+    for (row, first, last) in
+        [(ASYNCHRONOUS_RESET_ROW, 0, 43), (SYNCHRONOUS_PRESET_ROW, 5764, 5807)]
+    {
+        assert_eq!(G.fuse_of(ArrayCell { row, column: 0 }), Some(FuseId(first)));
+        assert_eq!(G.fuse_of(ArrayCell { row, column: COLUMNS - 1 }), Some(FuseId(last)));
+    }
+}
+
+#[test]
+fn a_block_with_no_data_terms_has_no_last_data_row() {
+    // `RowBlock` is public and constructible, so the empty case is
+    // reachable by a caller before it is reachable by this device. The
+    // point of the accessor is that it answers `None` rather than a
+    // wrapped `u32::MAX`, which `fuse_of` would then reject — two guards
+    // where one would do, but this is the one that cannot be forgotten
+    // at a call site.
+    let empty = RowBlock { output_enable_row: 7, data_rows: 8..8 };
+    assert_eq!(empty.last_data_row(), None);
+
+    let one = RowBlock { output_enable_row: 7, data_rows: 8..9 };
+    assert_eq!(one.last_data_row(), Some(8));
+
+    // Every real block has data terms.
+    for index in 0..Atf22v10Geometry::MACROCELLS {
+        let block = G.row_block(MacrocellIndex(index)).expect("a measured block");
+        assert_eq!(block.last_data_row(), Some(block.data_rows.end - 1), "macrocell {index}");
+    }
+}

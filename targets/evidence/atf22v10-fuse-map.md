@@ -23,9 +23,58 @@ WinCUPL's `g22v10` emits `QF5892` — GAL mode in the datasheet's Table 10-1, co
 
 Each experiment drives one output from one source and changes exactly one thing. In an AND array a `0` is an intact link, so a product term implementing a single literal leaves exactly **one** column intact — and that column identifies the source. `F0` makes every unmentioned fuse intact, so an unused row reads as all-zero and contributes nothing.
 
+[The complete fuse address map](#the-complete-fuse-address-map) at the end of this document collects every result below into one table, read in fuse order. Each section here is the evidence for one part of it.
+
 ## Array geometry
 
 132 rows × 44 columns = 5808 array fuses. 44 columns is 22 signal sources × 2.
+
+## Fuse addressing: the array is row-major, stride 44
+
+Cell (*row*, *column*) is fuse **44·*row* + *column***, so row *r* occupies the contiguous run 44*r* … 44*r*+43.
+
+This relation is what every other measurement in this document is expressed in, and until it was measured it was the one thing here that had never been checked. Each experiment was read by dividing a fuse address by 44 and calling the results "row" and "column" — which makes the row/column view a *consequence* of the formula and worthless as evidence for it. Stated plainly: a column-major array would have been described by exactly the same words, with every claim below transposed.
+
+So it was measured again, in absolute fuse addresses with nothing divided by anything. Eight designs already in the suite, read a second way:
+
+| experiment | product terms in the source | blown runs (absolute fuse addresses) | intact | written extent |
+|---|---|---|---|---|
+| `in1` | 2 (OE, one data) | 44–87, 89–131 | 88 | 44–131 |
+| `in2` | 2 (OE, one data) | 44–91, 93–131 | 92 | 44–131 |
+| `in3` | 2 (OE, one data) | 44–95, 97–131 | 96 | 44–131 |
+| `in4` | 2 (OE, one data) | 44–99, 101–131 | 100 | 44–131 |
+| `nc13` | 2 (OE, one data) | 44–130 | 131 | 44–131 |
+| `mc19` | 2 (OE, one data) | 2156–2203, 2205–2243 | 2204 | 2156–2243 |
+| `mc14` | 2 (OE, one data) | 5368–5415, 5417–5455 | 5416 | 5368–5455 |
+| `global-ar-sp` | 4 (OE, data, AR, SP) | 0–7, 9–91, 93–131, 5764–5775, 5777–5807 | 8, 92, 5776 | 0–131 and 5764–5807 |
+
+The *runs* are not the unit. Adjacent product terms merge into one run, and an intact link splits a run in two — `global-ar-sp` writes four terms and produces three runs. The unit is the **written extent**: the region a design's terms occupy, closed over the intact links inside it.
+
+Three things follow, each from a different feature of the data.
+
+**A product term is 44 fuses.** Each of `in1`, `in2`, `in3`, `in4` and `nc13` contains exactly two product terms — an always-enabled output-enable term and one single-literal data term — and each writes the same extent, 44–131, which is 88 fuses. The one intact link must lie in the data term, since the output-enable term has no literals and is entirely blown. Across those five designs that link appears at 88, 92, 96, 100 and **131**. So one product term spans at least 88…131, which is 44 addresses; two terms in 88 fuses makes each exactly 44. `global-ar-sp` gives the same answer independently from a different direction — four terms in 176 written fuses — and `mc14` and `mc19` each two terms in 88.
+
+Nothing here divides an address by 44. The inputs are absolute addresses and a count of product terms read off the source text.
+
+**Terms are contiguous and 44-aligned.** Every extent begins on a multiple of 44 — 0, 44, 2156, 5368, 5764 — and is a whole number of 44s: 44, 88, 132. Together with the width, that is a row-major array of 44-wide rows. It does not by itself exclude an array whose rows are subdivided further, which is why the width above is measured rather than inferred from alignment.
+
+**A pin's column is invariant across rows.** The same pin's literal, placed in different product terms, lands at addresses differing by an exact multiple of 44:
+
+| pin | appears at | difference | = |
+|---|---|---|---|
+| 3 | 96 (`in3`, pin 23's data term) and 8 (`global-ar-sp`, the AR term) | 88 | 2 × 44 |
+| 4 | 100 (`in4`) and 5776 (`global-ar-sp`, the SP term) | 5676 | 129 × 44 |
+| 2 | 92 (`in2`), 2204 (`mc19`), 5416 (`mc14`) | 2112 and 5324 | 48 × 44 and 121 × 44 |
+
+Three pins across six distinct product terms, spanning rows 0, 2, 50, 123 and 131 — both device-wide control rows and three macrocell blocks. Every difference is a multiple of 44, so a pin occupies the same offset within every term, and that offset is what this document calls its column.
+
+Note what is *not* evidence here: fuse 92 is where `in2`'s own literal lands, and column 4 was read off that very address. "92 = 44·2 + 4" is an identity, not a corroboration. It is the anchor the other measurements are compared against, which is why the table above states differences rather than decompositions.
+
+The extents also show that WinCUPL packs a single product term into the *first* data row of a block, immediately after that block's output-enable row.
+
+Experiments: `in1`, `in2`, `in3`, `in4`, `nc13`, `mc14`, `mc19`, `global-ar-sp` — all already in the suite; this reads them a second way rather than adding designs.
+
+Galette and GALasm both encode the array as row·44 + column, so this is `OpenSourceCrossChecked` as well as differentially verified. That agreement is a check, not the source: both are third-party implementations of the same device and could share an error, which is the situation the measurement above exists to resolve.
 
 ## Columns: true and complement
 
@@ -133,6 +182,8 @@ Experiment: `global-ar-sp`.
 
 WinCUPL is one witness, not an authority. Where it is the *only* witness — the column map, S0/S1 semantics, the pair ordering — the claim stands on triangulation between the experiments themselves rather than on WinCUPL being correct.
 
+The array's fuse addressing is WinCUPL-only in the same way, and is the one claim here with an independent implementation to check against: Galette and GALasm both encode row·44 + column. That makes it `OpenSourceCrossChecked` in addition to `DifferentiallyVerified`.
+
 ## The three JEDEC footprints, and the power-down fuse
 
 Compiling one design under three device types confirms the datasheet's Table 10-1 by experiment:
@@ -176,4 +227,81 @@ All six bytes match exactly. So the 64-bit signature region holds the `PartNo` f
 Experiments: `arch-comb-high` (PartNo 00), `sig-partno-41`, `sig-partno-5A`.
 
 ## Not established
+
 - **Which fuse value means "connected"** is taken from JEDEC 3A's definition (0 is a low-resistance link) rather than measured on hardware.
+
+## The complete fuse address map
+
+Every result above, in fuse order. **These tables are a summary and carry no evidence of their own.** Every claim in them is established by a section above, and the evidence-level statement there governs them too — nothing below this line is more certain than what it summarises, despite reading as flat fact.
+
+### Top level
+
+| fuses | count | region | footprints | evidence |
+|---|---|---|---|---|
+| 0 – 5807 | 5808 | AND array, 132 rows × 44 columns | all | Array geometry; Fuse addressing |
+| 5808 – 5827 | 20 | architecture S0/S1, ten interleaved pairs | all | Architecture bits S0 and S1 |
+| 5828 – 5891 | 64 | user signature, eight ASCII bytes MSB-first | GAL, power-down | The user signature carries CUPL's PartNo |
+| 5892 | 1 | power-down enable | power-down only | The three JEDEC footprints |
+
+`QF` is 5828 (`p22v10`), 5892 (`g22v10`), or 5893 (`g22v10cp`).
+
+The security fuse is not in this space. Every footprint's count is fully accounted for without it — 5808 + 20 (+ 64) (+ 1) — and in all the output examined it appears as the JEDEC `G` field rather than a numbered fuse. The datasheet §6 says the device has one; no experiment here locates it at a fuse index, and the model therefore declines to invent one.
+
+### The AND array, by row
+
+Row *r* occupies fuses 44*r* … 44*r*+43. The first row of each macrocell block is that macrocell's output-enable term; the rest are data terms.
+
+| rows | fuses | belongs to | OE row | data terms |
+|---|---|---|---|---|
+| 0 | 0 – 43 | asynchronous reset, device-wide | — | 1 |
+| 1 – 9 | 44 – 439 | pin 23 | 1 | 8 |
+| 10 – 20 | 440 – 923 | pin 22 | 10 | 10 |
+| 21 – 33 | 924 – 1495 | pin 21 | 21 | 12 |
+| 34 – 48 | 1496 – 2155 | pin 20 | 34 | 14 |
+| 49 – 65 | 2156 – 2903 | pin 19 | 49 | 16 |
+| 66 – 82 | 2904 – 3651 | pin 18 | 66 | 16 |
+| 83 – 97 | 3652 – 4311 | pin 17 | 83 | 14 |
+| 98 – 110 | 4312 – 4883 | pin 16 | 98 | 12 |
+| 111 – 121 | 4884 – 5367 | pin 15 | 111 | 10 |
+| 122 – 130 | 5368 – 5763 | pin 14 | 122 | 8 |
+| 131 | 5764 – 5807 | synchronous preset, device-wide | — | 1 |
+
+The blocks run **pin-descending** through the array: pin 23 nearest fuse 0.
+
+### Columns
+
+Offset within the row. Even columns carry the true sense, odd the complement.
+
+| col | source | col | source | col | source | col | source |
+|---|---|---|---|---|---|---|---|
+| 0/1 | pin 1 | 12/13 | pin 4 | 24/25 | pin 7 | 36/37 | pin 10 |
+| 2/3 | feedback pin 23 | 14/15 | feedback pin 20 | 26/27 | feedback pin 17 | 38/39 | feedback pin 14 |
+| 4/5 | pin 2 | 16/17 | pin 5 | 28/29 | pin 8 | 40/41 | pin 11 |
+| 6/7 | feedback pin 22 | 18/19 | feedback pin 19 | 30/31 | feedback pin 16 | 42/43 | **pin 13** |
+| 8/9 | pin 3 | 20/21 | pin 6 | 32/33 | pin 9 | | |
+| 10/11 | feedback pin 21 | 22/23 | feedback pin 18 | 34/35 | feedback pin 15 | | |
+
+Columns 42/43 are the exception the column map turns on: an odd-numbered source that is an input pin rather than feedback.
+
+**The column map is measured on one row and generalised.** Every one of the 22 sources was placed by a design driving pin 23, so every column position comes from that macrocell's first data row. What has been measured in *other* rows is three columns — 4, 8 and 12, in rows 0, 50, 123 and 131 — which is what the invariance argument under [Fuse addressing](#fuse-addressing-the-array-is-row-major-stride-44) rests on. Uniformity across all 132 rows is the natural reading of an AND array and is consistent with everything observed, but it is an inference from four rows, not a measurement of 132.
+
+This table gives each pin's **array columns** and says nothing about its **package role**. Which pin is the clock, which is a power rail, and which carries the power-down input are separate claims needing separate evidence, and none of them is established in this document yet.
+
+### Architecture pairs
+
+| pin | 23 | 22 | 21 | 20 | 19 | 18 | 17 | 16 | 15 | 14 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| S0 — polarity, 1 is active high | 5808 | 5810 | 5812 | 5814 | 5816 | 5818 | 5820 | 5822 | 5824 | 5826 |
+| S1 — mode, 1 is combinational | 5809 | 5811 | 5813 | 5815 | 5817 | 5819 | 5821 | 5823 | 5825 | 5827 |
+
+Pin-descending in *fuse address* order, the same direction as the row blocks: pin 23 takes both the lowest row and the lowest architecture fuse.
+
+This is the same fact the section [S0/S1 pair order is reversed relative to the row blocks](#s0s1-pair-order-is-reversed-relative-to-the-row-blocks) states as a reversal, read the other way round, and the two are worth reconciling explicitly because this is the document's most transposable claim. The *addresses* run the same way. The *indices* run opposite: the macrocell index ascends with the pin (*i* = pin − 14) while the pair index descends (*j* = 23 − pin), so *j* = 9 − *i*. Whether the orderings agree depends entirely on which of the two you name, which is why the model indexes macrocells by pin and derives both.
+
+### User signature
+
+Byte *b* is fuses 5828+8*b* … 5835+8*b*, most significant bit first. CUPL writes its `PartNo` field here as ASCII.
+
+| byte | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| fuses | 5828–5835 | 5836–5843 | 5844–5851 | 5852–5859 | 5860–5867 | 5868–5875 | 5876–5883 | 5884–5891 |

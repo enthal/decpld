@@ -47,7 +47,7 @@ M0 hardening, from the sub-agent reviews over the milestone's diff:
 Decode WinCUPL and Galette output into macrocells and equations; encode canonical equivalents; satisfy the round-trip invariants. Still no language.
 
 - [ ] `decpld-device`: `DeviceTarget` trait, `FuseMap` with write tracking, `FuseRegion`, `ConfigField`, `AndMatrixSpec`, `MacrocellSpec`, `PackageSpec` — `FuseMap`, `FuseRegions`, `FuseId`, `FuseMutability` landed in [#28](https://github.com/enthal/decpld/pull/28); the rest follow
-- [ ] `decpld-atf22v10`: DIP-24 package map, global clock, AND matrix, ten macrocells — every field citing its evidence. Fuse regions, array geometry, column and row mapping, and the three JEDEC footprints landed in [#31](https://github.com/enthal/decpld/pull/31); package map, clock resources and the matrix/macrocell specs follow
+- [ ] `decpld-atf22v10`: DIP-24 package map, global clock, AND matrix, ten macrocells — every field citing its evidence. Fuse regions, array geometry, column and row mapping, and the three JEDEC footprints landed in [#31](https://github.com/enthal/decpld/pull/31); the array's fuse addressing, measured rather than assumed, in [#35](https://github.com/enthal/decpld/pull/35); package map, clock resources and the matrix/macrocell specs follow
 - [ ] Encode: cube encoding with contradiction rejection, then row decode-and-verify
 - [ ] Decode: fuse vector → `PhysicalDesign`
 - [ ] Invariants: matrix cells map 1:1 to fuses, no undocumented field overlap, every fuse classified, every legal configuration round-trips
@@ -55,7 +55,7 @@ Decode WinCUPL and Galette output into macrocells and equations; encode canonica
 - [x] WinCUPL oracle harness: runner, run-metadata capture, scratch run directories — [#30](https://github.com/enthal/decpld/pull/30). Lives at `targets/experiments/<device>/run.sh`, not `tools/wincupl/`, and keeps run output in a scratch directory rather than committed fixture directories (SPEC.md §7.7)
 - [x] Differential experiment suite: literal mapping, polarity, registered, feedback, macrocell, fuse-count modes, signature — [#30](https://github.com/enthal/decpld/pull/30). OE and capacity still to do
 - [ ] `decpld oracle diff` with delta classification
-- [ ] Evidence level recorded per field; `targets/evidence/` populated — ATF22V10 fuse map measured and recorded in [#30](https://github.com/enthal/decpld/pull/30); per-field levels land with the target definition
+- [ ] Evidence level recorded per field; `targets/evidence/` populated — ATF22V10 fuse map measured and recorded in [#30](https://github.com/enthal/decpld/pull/30), with the complete fuse-address map added in [#35](https://github.com/enthal/decpld/pull/35); per-field levels land with the target definition
 
 ## M2 — Minimal combinational language
 
