@@ -1,6 +1,6 @@
 # Primary references for deCPLD device and format knowledge.
 #
-# SPEC.md §5.33 requires that exact revisions and hashes live here. The
+# SPEC.md §13.3 requires that exact revisions and hashes live here. The
 # `sha256` IS the identity of a document: vendors reissue PDFs at the
 # same URL without changing any visible revision string, so a citation
 # that names only a title and a URL cannot be checked later. A citation

@@ -6,7 +6,7 @@
 //! invalidates every issue report, script, and `--deny` list quoting it.
 //!
 //! The ranges below are derived from the three worked examples in
-//! SPEC.md §5.18 — `E0204` (a width error), `E1302` (a clock
+//! SPEC.md §8.3 — `E0204` (a width error), `E1302` (a clock
 //! requirement), `E2207` (an ATF16V8 mode failure) — and extended to
 //! cover the remaining layers.
 
@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn spec_example_codes_land_in_their_documented_categories() {
-        // The three examples in SPEC.md §5.18 are the check that these
+        // The three examples in SPEC.md §8.3 are the check that these
         // ranges were derived from the spec rather than invented.
         assert_eq!(Category::of(204), Category::Syntax); // value does not fit
         assert_eq!(Category::of(1302), Category::Semantics); // needs global clock

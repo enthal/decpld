@@ -1,4 +1,4 @@
-//! Diagnostic codes owned by the JEDEC layer (`3xxx`, SPEC.md §5.18.1).
+//! Diagnostic codes owned by the JEDEC layer (`3xxx`, SPEC.md §8.3.1).
 //!
 //! Codes are permanent. Add new ones; never renumber.
 

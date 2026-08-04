@@ -1,4 +1,4 @@
-//! Structured diagnostics. SPEC.md §5.18.
+//! Structured diagnostics. SPEC.md §8.3.
 
 use std::fmt;
 
@@ -203,7 +203,7 @@ impl DiagnosticBundle {
     }
 
     /// Promote every warning to an error, for `--deny-warnings`
-    /// (SPEC.md §5.16.3).
+    /// (SPEC.md §8.1.3).
     ///
     /// A property of the bundle rather than something each call site
     /// remembers to check — one place to get right instead of many.
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn codes_render_in_the_spec_form() {
-        // SPEC.md §5.18 shows `E0204`, `E1302`, `E2207`: always `E`,
+        // SPEC.md §8.3 shows `E0204`, `E1302`, `E2207`: always `E`,
         // always four digits, zero-padded.
         assert_eq!(DiagnosticCode::new(204).to_string(), "E0204");
         assert_eq!(DiagnosticCode::new(1302).to_string(), "E1302");
@@ -347,7 +347,7 @@ mod tests {
 
     #[test]
     fn deny_warnings_promotes_warnings_to_errors() {
-        // `--deny-warnings` (SPEC.md §5.16.3) must be a property of the
+        // `--deny-warnings` (SPEC.md §8.1.3) must be a property of the
         // bundle, not something each call site remembers to check.
         let mut bundle = DiagnosticBundle::default();
         bundle.push(Diagnostic::warning(DiagnosticCode::new(3100), "unknown field"));

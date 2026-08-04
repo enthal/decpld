@@ -21,7 +21,7 @@ pub enum FuseWriteError {
     Conflict { fuse: FuseId, region: &'static str, existing: bool, attempted: bool },
 
     /// A reserved fuse is a **hard error**, never a warning
-    /// (SPEC.md §5.32).
+    /// (SPEC.md §13.2).
     #[error(
         "{fuse} is reserved in region `{region}` and must stay {required}; \
          changing it is undefined behaviour in silicon"
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn writing_a_reserved_fuse_is_a_hard_error() {
-        // SPEC.md §5.32: a reserved fuse change is an error, never a
+        // SPEC.md §13.2: a reserved fuse change is an error, never a
         // warning. There is no diagnostic on a device that misbehaves
         // in a circuit.
         let mut map = FuseMap::erased(device());

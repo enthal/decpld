@@ -13,7 +13,7 @@ The repo is **pre-implementation**: what exists today is the spec, the licence, 
 - [SPEC.md](SPEC.md) is canonical and authoritative. Read the relevant section before writing code that touches an area — it is normative, not aspirational, down to the Rust type shapes.
 - When code and spec disagree, **raise the conflict with the user** and decide whether to change the code or the spec. Never silently drift from the spec.
 - Any normative change (a language rule, a type shape, an IR node, a device field, a fuse mapping, a diagnostic code, a CLI flag, a JEDEC behavior) MUST update SPEC.md **in the same commit**. A normative change that ships without a spec update is a process bug, not a shortcut.
-- The definition of done is [SPEC.md §5.34](SPEC.md). Read it when you need to know whether something is finished.
+- The definition of done is [SPEC.md §13.4](SPEC.md). Read it when you need to know whether something is finished.
 
 ## The one architectural rule
 
@@ -40,7 +40,7 @@ If you find yourself reaching downward for convenience — a fitter shortcut in 
 A compiler bug here does not produce a stack trace. It produces a programmed chip that behaves subtly wrong in a circuit, and the user debugs their *hardware* for a week. **A wrong fuse is a corruption-class bug.** Everything below follows from that.
 
 - **Never emit an unchecked minimized equation.** Every minimization result is verified against its source Boolean function — exhaustively for small support sets, by SAT/BDD beyond that (SPEC.md §3.9).
-- **Encode, then decode, then compare.** The compile driver generates fuses, decodes them back into a physical design, and asserts equivalence with the design it intended, before writing any file (SPEC.md §5.27). This round-trip is enabled by default and must stay that way.
+- **Encode, then decode, then compare.** The compile driver generates fuses, decodes them back into a physical design, and asserts equivalence with the design it intended, before writing any file (SPEC.md §12.1). This round-trip is enabled by default and must stay that way.
 - **Every legal configuration round-trips.** Encode/decode is a device-model invariant, tested per macrocell, per mode, per polarity — not just on the designs that happen to appear in examples.
 - **Validate physically before encoding** (SPEC.md §5.4): every output placed, no resource double-booked, every literal routable, reserved fuses unchanged, reconstructed equations equal to the requested mapped design.
 - **The RTL simulator and the decoded-fuse simulator must agree** — exhaustively for small designs, randomized for larger ones. Two independent models disagreeing is how a mapping error announces itself.
@@ -51,15 +51,15 @@ A compiler bug here does not produce a stack trace. It produces a programmed chi
 The ATF22V10 and ATF16V8 fuse maps are the project's factual bedrock, and getting one bit wrong is invisible until hardware misbehaves.
 
 - **Never enter a numeric fuse position from memory, inference, or a plausible-looking pattern.** Not yours, not the user's, not another tool's. This is the single easiest way to poison the project.
-- **Every fuse mapping cites its evidence in a source comment**, and the exact document revisions and hashes live in `targets/evidence/`. Primary references are listed in SPEC.md §5.33.
-- **A mapping becomes verified only when independent sources agree**: official documentation, open-source cross-checking (Galette, GALasm), controlled WinCUPL differential experiments, encode/decode invariants, and — the highest bar — physical hardware tests. `EvidenceLevel` (SPEC.md §5.31) records which of these a field has actually reached.
+- **Every fuse mapping cites its evidence in a source comment**, and the exact document revisions and hashes live in `targets/evidence/`. Primary references are listed in SPEC.md §13.3.
+- **A mapping becomes verified only when independent sources agree**: official documentation, open-source cross-checking (Galette, GALasm), controlled WinCUPL differential experiments, encode/decode invariants, and — the highest bar — physical hardware tests. `EvidenceLevel` (SPEC.md §13.1) records which of these a field has actually reached.
 - **Unverified hypotheses belong in oracle-analysis code or disabled experimental targets**, never in a production target definition.
 - **WinCUPL is an oracle, not an authority.** It is one witness among several and is not assumed infallible. Triangulate. Production compilation must never require WinCUPL, Wine, or Windows.
-- **Do not redistribute proprietary WinCUPL files**, device libraries, or embedded serial numbers. `.gitignore` blocks the install tree. WinCUPL's own output is not committed either: what goes in the repository is the experiment *input* and *recipe* — our `.pld` sources, the run metadata, and a runner — plus the measurements read out of the result, recorded in `targets/evidence/`. Freely-redistributable cross-checks (Galette, GALasm) are a separate case and their output may be committed with attribution. Oracle runs record wine version, WinCUPL version, executable and library hashes, and the exact command line (SPEC.md §5.9).
+- **Do not redistribute proprietary WinCUPL files**, device libraries, or embedded serial numbers. `.gitignore` blocks the install tree. WinCUPL's own output is not committed either: what goes in the repository is the experiment *input* and *recipe* — our `.pld` sources, the run metadata, and a runner — plus the measurements read out of the result, recorded in `targets/evidence/`. Freely-redistributable cross-checks (Galette, GALasm) are a separate case and their output may be committed with attribution. Oracle runs record wine version, WinCUPL version, executable and library hashes, and the exact command line (SPEC.md §7.2).
 
 ## Determinism is a first-class requirement
 
-SPEC.md §5.32 makes it normative: the same source, compiler, target database, and options produce the same fuse vector. That forces rules that touch nearly every phase.
+SPEC.md §13.2 makes it normative: the same source, compiler, target database, and options produce the same fuse vector. That forces rules that touch nearly every phase.
 
 - **No ambient nondeterminism in compiler code.** No `SystemTime::now()`, no `Instant::now()`, no unseeded RNG, no hashing that leaks address randomness into output. Timestamps are excluded in reproducible mode.
 - **No `HashMap` iteration order in anything that reaches output.** Use `BTreeMap` / `IndexMap` for symbol tables, package scopes, fuse regions, encodings, and report structures — SPEC.md's type shapes already say so; follow them.
@@ -119,11 +119,11 @@ Everything else: CLI argument plumbing, report text layout, stage-dump formattin
 - **Unit** (`#[cfg(test)]` in-module): pure logic. The default and minimum bar.
 - **Equivalence** (exhaustive or SAT/BDD): the mandatory companion to every minimization and every mapping transformation. A minimizer test that only checks cube *count* has tested nothing that matters.
 - **Property** (`proptest`): JEDEC round-trip over random valid fuse vectors, encode/decode round-trip over random legal configurations, formatter idempotence, `!!f == f` through polarity selection.
-- **Golden fixtures** (`targets/fixtures/`): checked-in `.jed` and normalized oracle output. Regenerate deliberately and `git diff` before committing. Compare at the level SPEC.md §5.25 defines — `ExactFuseVector` or `ExactPhysicalConfiguration` for normal acceptance, `ExactFile` only for deliberately pinned oracle experiments.
+- **Golden fixtures** (`targets/fixtures/`): checked-in `.jed` and normalized oracle output. Regenerate deliberately and `git diff` before committing. Compare at the level SPEC.md §11.1 defines — `ExactFuseVector` or `ExactPhysicalConfiguration` for normal acceptance, `ExactFile` only for deliberately pinned oracle experiments.
 - **Snapshot** (`insta`): diagnostics, fit reports, and `decpld dump --stage …` output. These are the compiler explaining itself; a regression in the explanation is a real regression.
 - **Integration** (`tests/`): end-to-end through the CLI, source file to `.jed`.
 - **Fuzz** (later milestones): the lexer/parser and the JEDEC parser. Malformed input must never panic or allocate unbounded.
-- **Hardware** (SPEC.md §5.15): the final authority. Record part marking, programmer version, JEDEC hash, vectors, and results.
+- **Hardware** (SPEC.md §7.8): the final authority. Record part marking, programmer version, JEDEC hash, vectors, and results.
 
 ## Build & test
 
@@ -147,8 +147,8 @@ Operational reminders; the rationale is in the spec.
 - **The compiler explains itself.** Every phase has a debug dump (`decpld dump --stage ast|hir|rtl|boolean|sop|placed|fuses`). Every fit failure identifies the *limiting resource* and actionable alternatives — "no ATF16V8 mode can implement this design" is useless without the reason each mode was rejected. `decpld jed inspect` must make a fuse map readable as macrocells and equations. Making the device's real architecture visible is a feature, not debug output.
 - **Conservative and transparent beats clever.** Support a compact language completely and verify every transformation, rather than supporting more and trusting more. Reject ambiguity (underconstrained parameters, nonlinear constraints, combinational cycles) rather than guessing.
 - **The source is authoritative for the target.** `device` inside the selected `top` decides the device and package; CLI `--device` / `--package` are *checked assertions* that must agree, never overrides.
-- **One producer per signal bit** (SPEC.md §2.2) and **no inferred latches** (§2.3) are load-bearing language invariants. A regression against either is a P0 bug.
-- **Declaration order never matters** (§2.5). Index files and declarations before resolving bodies. If a change makes file order or declaration order observable, it is wrong.
+- **One producer per signal bit** (SPEC.md §0.2.2) and **no inferred latches** (§0.2.3) are load-bearing language invariants. A regression against either is a P0 bug.
+- **Declaration order never matters** (§0.2.5). Index files and declarations before resolving bodies. If a change makes file order or declaration order observable, it is wrong.
 
 ## Code style
 
@@ -157,8 +157,9 @@ Operational reminders; the rationale is in the spec.
 - **No `unwrap()` / `expect()` in non-test code**, except where a contract makes failure impossible — and even then prefer a typed `Result`. `expect` messages describe the invariant, not the operation.
 - **Compile-time integers are arbitrary-precision** (`BigInt`) inside the compiler. Parameter arithmetic must not silently wrap; that is the language's own promise about widths turned inward.
 - **Map naming:** `things_by_key` for a `Map<key, thing>` **field**. Nested: `things_by_inner_by_outer` means `Map<outer, Map<inner, thing>>` (read right-to-left). For collection values include the container: `cube_vecs_by_macrocell`. **`_by_` is for maps only** — a singular accessor is named for what it returns (`fn macrocell(&self, id)`), and if the key must be named use `_of_`: `fn pad_of_pin(...)`.
-- **Errors identify object context.** A diagnostic names file, span, and the design object — top, instance path, signal, bit, pin, macrocell, product term — wherever it can. `error[E1302]: registered signal requires ATF22V10 pin 1 as global clock` is the bar. Errors are structured Rust types with a code and labels; the CLI and LSP render them (SPEC.md §5.18).
+- **Errors identify object context.** A diagnostic names file, span, and the design object — top, instance path, signal, bit, pin, macrocell, product term — wherever it can. `error[E1302]: registered signal requires ATF22V10 pin 1 as global clock` is the bar. Errors are structured Rust types with a code and labels; the CLI and LSP render them (SPEC.md §8.3).
 - **Diagnostic codes are stable.** Once `E0204` means "value does not fit", it always means that. Add new codes; don't renumber.
+- **SPEC.md section numbers are stable too.** Once `§13.2` names Safety, it keeps naming it. Add sections and parts at the end of their part; never renumber to make room. A merged commit message quoting a section number cannot be corrected later, so a renumber silently falsifies history. If one is truly unavoidable, every citation in the repo moves in the same commit and the commit message carries the old-to-new mapping.
 - **Structural safety over incidental correctness:** `char_indices()` over byte slicing; a lossless (Rowan-style) syntax tree so comments and malformed nodes survive formatting and LSP recovery; access fuse state through `FuseMap` methods, never a raw bit vector.
 - **Markdown is never hard-wrapped.** One logical line per paragraph, list item, and block-quote — let the renderer soft-wrap. Do not insert newlines mid-paragraph to hit a column width; it carries no meaning and churns diffs. Applies to every `.md` file, SPEC.md included. Enforced by `scripts/markdown-no-hardwrap.sh` in CI and the pre-commit hook.
 

@@ -36,7 +36,7 @@ The `id` is the key from `references.toml`; the locator names the section, table
 
 ## Evidence levels
 
-From SPEC.md §5.31, weakest to strongest:
+From SPEC.md §13.1, weakest to strongest:
 
 | Level | Means |
 | --- | --- |

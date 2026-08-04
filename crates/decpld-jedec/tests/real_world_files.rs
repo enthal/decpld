@@ -14,7 +14,7 @@
 //! Second, and more valuable: each file carries a `C` fuse checksum that
 //! Galette computed with its own independent implementation. Agreeing
 //! with it raises the checksum algorithm from "matches the standard's
-//! worked example" to `OpenSourceCrossChecked` (SPEC.md §5.31) — two
+//! worked example" to `OpenSourceCrossChecked` (SPEC.md §13.1) — two
 //! implementations that never saw each other's code producing the same
 //! number over 2194 real fuses.
 

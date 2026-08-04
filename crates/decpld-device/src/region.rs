@@ -28,7 +28,7 @@ pub enum FuseMutability {
     Programmable,
 
     /// Must hold exactly this value. A change is a **hard error**, never
-    /// a warning (SPEC.md §5.32) — a reserved fuse programmed wrongly is
+    /// a warning (SPEC.md §13.2) — a reserved fuse programmed wrongly is
     /// undefined behaviour in silicon, and there is no diagnostic on a
     /// device that misbehaves in a circuit.
     Reserved(bool),
@@ -100,7 +100,7 @@ pub enum RegionError {
     #[error("region `{name}` ends at {end}, past the device's {count} fuses")]
     PastEnd { name: &'static str, end: u32, count: u32 },
 
-    /// The security fuse must erase clear. SPEC.md §5.32 and CLAUDE.md
+    /// The security fuse must erase clear. SPEC.md §13.2 and CLAUDE.md
     /// → Safety: a device that arrives "erased" with the readback lock
     /// already engaged is unreadable before anything has programmed it.
     #[error(
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn a_security_region_must_erase_clear() {
-        // SPEC.md §5.32. A device arriving "erased" with the readback
+        // SPEC.md §13.2. A device arriving "erased" with the readback
         // lock engaged is unreadable before anything has programmed it.
         let error = FuseRegions::new(
             2,

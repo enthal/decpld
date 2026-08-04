@@ -2,7 +2,7 @@
 //!
 //! Only the `jed` family exists so far (M0). The rest of the surface —
 //! `build`, `check`, `fmt`, `sim`, `report`, `oracle`, `program` — is
-//! specified in SPEC.md Part VIII and arrives with the milestones that
+//! specified in SPEC.md §8 and arrives with the milestones that
 //! give those commands something to do.
 //!
 //! Commands here stay thin: they read files, call the library, and print
@@ -48,7 +48,7 @@ enum JedCommand {
         /// How tolerant to be of what the file contains
         ///
         /// Named `--strictness` rather than `--mode` because `--mode`
-        /// already means an ATF16V8 global mode (SPEC.md §5.16.3), which
+        /// already means an ATF16V8 global mode (SPEC.md §8.1.3), which
         /// is the datasheet's own word for registered/complex/simple.
         /// `jed inspect --device` will report one, so the two would
         /// otherwise collide on a single command.

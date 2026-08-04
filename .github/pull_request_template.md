@@ -16,6 +16,6 @@
 <!-- Only for PRs that touch a target definition, fuse mapping, fitter, or JEDEC encoding. -->
 
 - [ ] Every new or changed fuse mapping cites its evidence in a source comment.
-- [ ] Evidence level reached (SPEC.md §5.31): `Hypothesis` / `DifferentiallyVerified` / `OpenSourceCrossChecked` / `HardwareVerified`
+- [ ] Evidence level reached (SPEC.md §13.1): `Hypothesis` / `DifferentiallyVerified` / `OpenSourceCrossChecked` / `HardwareVerified`
 - [ ] Encode → decode round-trip holds, and the decoded design compares equal to the intended physical design.
 - [ ] No writable fuse left unclassified.

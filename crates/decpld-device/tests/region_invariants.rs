@@ -144,7 +144,7 @@ proptest! {
     fn a_security_region_that_erases_set_is_always_rejected(
         (count, regions) in any_valid_layout()
     ) {
-        // SPEC.md §5.32 and CLAUDE.md → Safety. A device arriving
+        // SPEC.md §13.2 and CLAUDE.md → Safety. A device arriving
         // "erased" with the readback lock already engaged is unreadable
         // before anything has programmed it, and no device model may
         // declare that.

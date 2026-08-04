@@ -49,14 +49,14 @@ work="$(mktemp -d)"
 cp "$source_file" "$work/"
 
 # Record what produced the result. A fuse mapping is only evidence if the
-# thing that produced it can be identified later (SPEC.md §5.9).
+# thing that produced it can be identified later (SPEC.md §7.2).
 #
 # The hashes are taken of the executable and library that are ACTUALLY
 # used, derived from the same variables the command line is built from.
 # Hashing fixed paths instead meant `DECPLD_WIN_CUPL_EXE=...cupl40.exe`
 # ran one binary and recorded the hash of another — a provenance record
 # naming the wrong producer, which is worse than none, and precisely what
-# §5.9 exists to prevent.
+# §7.2 exists to prevent.
 win_to_host() {
     # C:\Foo\Bar -> $WINEPREFIX/drive_c/Foo/Bar, case-insensitively on
     # the drive letter. Only drive C is mapped; anything else is a
@@ -87,7 +87,7 @@ hash_of() {
     fi
 }
 
-# WinCUPL's own version, rather than a hand-copied string. §5.9 lists it
+# WinCUPL's own version, rather than a hand-copied string. §7.2 lists it
 # as a required field, and a version nobody captured cannot be checked
 # against a run.
 release_notes="$(win_to_host "${DECPLD_WIN_CUPL_ROOT}\\release_notes.txt" 2>/dev/null || true)"

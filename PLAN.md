@@ -1,10 +1,10 @@
 # deCPLD implementation plan
 
-The milestone sequence from [SPEC.md](SPEC.md) §5.26, expanded into checkable steps. **Tick a box in the same PR that delivers it**, with a clickable PR link — a merged PR whose plan item is still unchecked is a process bug (see [CLAUDE.md](CLAUDE.md) → merge ceremony).
+The milestone sequence from [SPEC.md](SPEC.md) §11.2, expanded into checkable steps. **Tick a box in the same PR that delivers it**, with a clickable PR link — a merged PR whose plan item is still unchecked is a process bug (see [CLAUDE.md](CLAUDE.md) → merge ceremony).
 
 The ordering is deliberate: JEDEC and the device model come *before* the language. Reading and writing a real ATF22V10 fuse map, and proving the round-trip, is what makes every later phase checkable. A language that compiles to an unverified encoder is a language that compiles to nothing trustworthy.
 
-Crates are created by the milestone that needs them; SPEC.md §3 records the full target layout.
+Crates are created by the milestone that needs them; SPEC.md §0.3 records the full target layout.
 
 ---
 
@@ -52,7 +52,7 @@ Decode WinCUPL and Galette output into macrocells and equations; encode canonica
 - [ ] Decode: fuse vector → `PhysicalDesign`
 - [ ] Invariants: matrix cells map 1:1 to fuses, no undocumented field overlap, every fuse classified, every legal configuration round-trips
 - [ ] `decpld jed inspect --device ATF22V10C` with a `--json` form
-- [x] WinCUPL oracle harness: runner, run-metadata capture, scratch run directories — [#30](https://github.com/enthal/decpld/pull/30). Lives at `targets/experiments/<device>/run.sh`, not `tools/wincupl/`, and keeps run output in a scratch directory rather than committed fixture directories (SPEC.md §5.14)
+- [x] WinCUPL oracle harness: runner, run-metadata capture, scratch run directories — [#30](https://github.com/enthal/decpld/pull/30). Lives at `targets/experiments/<device>/run.sh`, not `tools/wincupl/`, and keeps run output in a scratch directory rather than committed fixture directories (SPEC.md §7.7)
 - [x] Differential experiment suite: literal mapping, polarity, registered, feedback, macrocell, fuse-count modes, signature — [#30](https://github.com/enthal/decpld/pull/30). OE and capacity still to do
 - [ ] `decpld oracle diff` with delta classification
 - [ ] Evidence level recorded per field; `targets/evidence/` populated — ATF22V10 fuse map measured and recorded in [#30](https://github.com/enthal/decpld/pull/30); per-field levels land with the target definition
@@ -122,4 +122,4 @@ Decode WinCUPL and Galette output into macrocells and equations; encode canonica
 - [ ] Security-fuse path behind both `--security-fuse` and `--acknowledge-readback-lock`
 - [ ] Packaging and installation
 - [ ] Complete evidence and hardware matrix; every writable fuse classified and explained
-- [ ] [SPEC.md](SPEC.md) §5.34 definition of done satisfied, item by item
+- [ ] [SPEC.md](SPEC.md) §13.4 definition of done satisfied, item by item

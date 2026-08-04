@@ -5,7 +5,7 @@
 //! and an editor's red squiggle from ever disagreeing (CLAUDE.md → the
 //! one architectural rule).
 //!
-//! Types follow SPEC.md §3.2 (spans) and §5.18 (diagnostics).
+//! Types follow SPEC.md §3.2 (spans) and §8.3 (diagnostics).
 
 mod diagnostic;
 mod line_index;

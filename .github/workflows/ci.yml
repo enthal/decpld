@@ -67,7 +67,7 @@ jobs:
         with:
           toolchain: "1.95.0"
       - uses: Swatinem/rust-cache@v2
-      # `--locked` because reproducibility is normative (SPEC.md §5.32):
+      # `--locked` because reproducibility is normative (SPEC.md §13.2):
       # the committed Cargo.lock is part of "the same compiler", and a
       # silent dependency bump in CI would undermine the guarantee that
       # the same inputs produce the same fuse vector.
