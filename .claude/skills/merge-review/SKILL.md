@@ -41,6 +41,8 @@ Review the diff against these criteria, in priority order. The first three are w
 
 2. **Spawn a review sub-agent** (read-only; it must not edit). Give it: the exact changed files, the specific SPEC.md sections and CLAUDE.md to read **first**, and the criteria above. Instruct it to cite `file:line`, rate each finding **High / Medium / Low**, distinguish real bugs from nits, briefly confirm what it verified as sound, and list spec/CLAUDE divergences explicitly. It may run `cargo clippy` / `cargo test` to confirm state, but should focus on what tooling does **not** catch. For a large or multi-area diff, use one sub-agent per area, in parallel — for example one on the device/fuse layer and one on the language layer, since the failure modes are entirely different.
 
+   **If sub-agents are unavailable** — some sessions gate them behind an explicit request — do not silently substitute yourself and carry on. Say so out loud, ask whether to enable them, and if the answer is no, run the criteria inline while stating plainly that this is a **weak fallback**: the author reviewing their own diff is the least reliable form of review there is. It reliably catches mechanical faults (ordering, normalisation, naming) and reliably misses the thing that matters most — a wrong assumption the author is still holding, which reads as obviously correct to the person who made it. Record in the PR that the review was inline, so the gap is visible to whoever reads it later rather than buried.
+
 3. **Triage and handle the findings yourself** (the sub-agent only reports):
    - Fix High and worthwhile Medium findings in the working tree.
    - For any normative change, update SPEC.md in the **same commit** (never-drift).
