@@ -34,6 +34,7 @@ unsafe_code = "forbid"
 decpld-diagnostics = { path = "crates/decpld-diagnostics" }
 decpld-jedec = { path = "crates/decpld-jedec" }
 decpld-device = { path = "crates/decpld-device" }
+decpld-atf22v10 = { path = "crates/decpld-atf22v10" }
 
 # Derived error types. Keeps the "errors identify object context" rule
 # (CLAUDE.md) cheap enough that there is no excuse for a bare String.

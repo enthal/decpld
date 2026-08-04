@@ -1,0 +1,20 @@
+//! The ATF22V10C device model. SPEC.md §4.7.
+//!
+//! **Every numeric constant in this crate cites the experiment that
+//! measured it.** The citations name files in
+//! `targets/experiments/atf22v10/`, and the reasoning is written up in
+//! `targets/evidence/atf22v10-fuse-map.md`. A number here without a
+//! citation is a bug, not a shortcut — a wrong fuse produces a chip that
+//! misbehaves in a circuit and a user who debugs their hardware for a
+//! week.
+//!
+//! Nothing in this crate knows about JEDEC syntax. It describes a
+//! device; `decpld-jedec` serialises fuse states.
+
+mod geometry;
+mod regions;
+
+pub use geometry::{
+    Atf22v10Geometry, COLUMNS, MacrocellIndex, PinNumber, ROWS, SignalSource, SourceKind,
+};
+pub use regions::{Footprint, FootprintError, regions_for};
