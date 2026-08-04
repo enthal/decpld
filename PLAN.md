@@ -13,7 +13,7 @@ Crates are created by the milestone that needs them; SPEC.md §3 records the ful
 - [x] GitHub repository, dual MIT OR Apache-2.0 licensing, `.gitignore`, pinned toolchain — [#1](https://github.com/enthal/decpld/pull/1)
 - [x] Cargo workspace and the placeholder `decpld` binary — [#2](https://github.com/enthal/decpld/pull/2)
 - [x] Markdown no-hardwrap lint; SPEC.md soft-wrapped — [#3](https://github.com/enthal/decpld/pull/3)
-- [x] CI (fmt, clippy, test on macOS + Linux, markdown), pre-commit hook, PR template — [#4](https://github.com/enthal/decpld/pull/4)
+- [x] CI (fmt, clippy, test, markdown) on Linux, pre-commit hook, PR template — [#4](https://github.com/enthal/decpld/pull/4), [#6](https://github.com/enthal/decpld/pull/6)
 - [x] Branch protection: PRs only, linear history, required status checks, signed commits — [#4](https://github.com/enthal/decpld/pull/4)
 - [x] CLAUDE.md, README.md, this plan, and the `merge-review` skill — [#5](https://github.com/enthal/decpld/pull/5)
 - [ ] `targets/evidence/`: datasheet revisions and hashes recorded from SPEC.md §5.33
