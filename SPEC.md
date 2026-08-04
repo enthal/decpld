@@ -2518,6 +2518,14 @@ pub fn classify_fuse(
 decpld oracle diff baseline.jed changed.jed --device ATF22V10C
 ```
 
+`--device` is required for the same reason `jed inspect` requires it (§8.2): a JEDEC file does not say what part it is for. **Both** files are checked against it, not only the first — classifying a foreign file's fuses against this device's map would describe it as a part it is not, and the second argument is where that is easiest to miss.
+
+Deltas are **grouped by category**, with a count per category ahead of the detail. A single varied literal produces one or two deltas in one category; a changed macrocell produces dozens across several — and which groups appear at all is usually the finding an experiment is looking for.
+
+**The design-specification header is summarised, never printed.** WinCUPL's banner carries a timestamp, the design's name, and the installation's *serial number*: it differs between any two runs, would bury the fuse findings, and is the one part of an oracle result that must not be redistributed (§7.2). `jed diff` prints the text for anyone who wants it.
+
+Exit codes follow §8.2.1 as `jed diff` does: a difference is a **finding**, an unreadable or foreign file is **trouble**. An oracle session is scripted over dozens of experiments, so "these files differ" has to be distinguishable from "I could not read that file".
+
 A mapping becomes verified only when multiple independent fixtures agree, invariants hold, encode/decode round-trips, and preferably hardware testing succeeds.
 
 ## 7.6 Metadata parsing

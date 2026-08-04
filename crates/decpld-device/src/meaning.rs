@@ -191,7 +191,7 @@ impl fmt::Display for FuseMeaning {
                     Polarity::True => "",
                     Polarity::Complement => "!",
                 };
-                write!(f, "{role} {row}, literal {sense}{source}")
+                write!(f, "{role} in {row}: literal {sense}{source}")
             }
             FuseMeaning::ConfigField { macrocell: Some(macrocell), field, bit, .. } => {
                 write!(f, "{macrocell} {field} bit {bit}")
@@ -227,6 +227,35 @@ impl fmt::Display for ProductTermRole {
             }
             ProductTermRole::AsynchronousReset => write!(f, "the asynchronous-reset term"),
             ProductTermRole::SynchronousPreset => write!(f, "the synchronous-preset term"),
+        }
+    }
+}
+
+impl FuseMeaning {
+    /// A short, stable category name.
+    ///
+    /// What §7.5 asks a delta to be *classified* as, separate from the
+    /// full description. Stable because oracle work is comparative: a
+    /// category that changed spelling between runs would make two
+    /// analyses of one device look like a disagreement.
+    #[must_use]
+    pub fn category(&self) -> &'static str {
+        match self {
+            FuseMeaning::MatrixCell { role: ProductTermRole::Data { .. }, .. } => "matrix-data",
+            FuseMeaning::MatrixCell { role: ProductTermRole::OutputEnable { .. }, .. } => {
+                "matrix-output-enable"
+            }
+            FuseMeaning::MatrixCell { role: ProductTermRole::AsynchronousReset, .. } => {
+                "matrix-asynchronous-reset"
+            }
+            FuseMeaning::MatrixCell { role: ProductTermRole::SynchronousPreset, .. } => {
+                "matrix-synchronous-preset"
+            }
+            FuseMeaning::ConfigField { field, .. } => field,
+            FuseMeaning::UserSignature { .. } => "user-signature",
+            FuseMeaning::SecurityFuse => "security",
+            FuseMeaning::Other { .. } => "other",
+            FuseMeaning::Unknown { .. } => "unknown",
         }
     }
 }

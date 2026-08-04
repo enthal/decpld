@@ -20,10 +20,13 @@
 //! must not live inside a CLI function).
 
 use decpld_atf22v10::{
-    DesignError, Footprint, FootprintError, MacrocellError, and_matrix, decode_design, dip24,
-    macrocells, regions_for,
+    DEVICE, DesignError, Footprint, FootprintError, MacrocellError, and_matrix, decode_design,
+    dip24, macrocells, regions_for,
 };
-use decpld_device::{FuseMap, FuseStatesError, MatrixError, PackageSpec, RegionError};
+use decpld_device::{
+    AndMatrixSpec, FuseMap, FuseRegions, FuseStatesError, MacrocellSpec, MatrixError, PackageSpec,
+    RegionError,
+};
 use decpld_jedec::JedecFile;
 use decpld_report::{InspectReport, ReportError, SourceReport};
 
@@ -39,10 +42,54 @@ pub enum Device {
 }
 
 impl Device {
-    fn package(self) -> PackageSpec {
-        match self {
-            Device::Atf22v10c => dip24(),
-        }
+    /// Assemble the model, for a file of the given fuse count.
+    ///
+    /// The count decides the footprint, and the footprint decides the
+    /// fuse regions — a PAL-mode file has no signature — so a model is
+    /// built against a file rather than standing alone.
+    ///
+    /// # Errors
+    ///
+    /// If the count is not one this device has, or if the measured
+    /// tables ever fail their own construction rules.
+    pub fn model_for(self, fuse_count: u32) -> Result<DeviceModel, InspectError> {
+        let Device::Atf22v10c = self;
+        let footprint = Footprint::from_fuse_count(fuse_count)?;
+        Ok(DeviceModel {
+            device: DEVICE,
+            footprint,
+            package: dip24(),
+            matrix: and_matrix()?,
+            specs: macrocells()?,
+            regions: regions_for(footprint)?,
+        })
+    }
+}
+
+/// One device, assembled: everything a reader of a fuse map consults.
+///
+/// Held together rather than rebuilt at each call site, because the
+/// five pieces must describe the *same* footprint and passing them
+/// separately is an invitation to mix a PAL region map with a GAL fuse
+/// vector.
+pub struct DeviceModel {
+    pub device: &'static str,
+    pub footprint: Footprint,
+    pub package: PackageSpec,
+    pub matrix: AndMatrixSpec,
+    pub specs: Vec<MacrocellSpec>,
+    pub regions: FuseRegions,
+}
+
+impl DeviceModel {
+    /// Whether a second file describes the same footprint as this
+    /// model.
+    ///
+    /// # Errors
+    ///
+    /// If the count is not one this device has at all.
+    pub fn check_fuse_count(&self, fuse_count: u32) -> Result<Footprint, InspectError> {
+        Ok(Footprint::from_fuse_count(fuse_count)?)
     }
 }
 
@@ -88,31 +135,24 @@ pub fn inspect(
     device: Device,
     package: Option<&str>,
 ) -> Result<InspectReport, InspectError> {
-    let Device::Atf22v10c = device;
-
     // The file's `QF` decides the footprint. The device model refuses a
     // count it does not have, which is what turns "this is an ATF16V8
     // file" from a confusing half-decode into one sentence.
-    let footprint = Footprint::from_fuse_count(file.fuses.len())?;
-    let regions = regions_for(footprint)?;
+    let model = device.model_for(file.fuses.len())?;
 
-    let map = FuseMap::from_states(regions, file.fuses.iter())?;
+    let map = FuseMap::from_states(model.regions.clone(), file.fuses.iter())?;
     let design = decode_design(&map)?;
 
-    let package_spec = device.package();
     if let Some(requested) = package
-        && !requested.eq_ignore_ascii_case(package_spec.name())
+        && !requested.eq_ignore_ascii_case(model.package.name())
     {
         return Err(InspectError::PackageMismatch {
-            package_in_file: package_spec.name(),
+            package_in_file: model.package.name(),
             requested: requested.to_owned(),
         });
     }
 
-    let matrix = and_matrix()?;
-    let specs = macrocells()?;
-
-    let report = InspectReport::new(&design, &package_spec, &matrix, &specs, &map)?
+    let report = InspectReport::new(&design, &model.package, &model.matrix, &model.specs, &map)?
         .with_source(source_report(file))
         // The ATF22V10C's security bit is the JEDEC `G` field and has
         // no fuse index inside `QF` (SPEC.md §4.7), so the fuse map

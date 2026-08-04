@@ -335,3 +335,36 @@ fn a_matrix_fuse_is_never_reported_as_something_else() {
         );
     }
 }
+
+#[test]
+fn categories_separate_the_things_an_experiment_varies_one_at_a_time() {
+    // SPEC.md §7.5 asks for a classification, which is coarser than the
+    // full description and is what makes a batch of deltas readable.
+    // The distinctions that matter are the ones a differential
+    // experiment is designed around: a data term is not an enable term,
+    // and polarity is not mode.
+    assert_eq!(meaning(8).category(), "matrix-data");
+    assert_eq!(meaning(4).category(), "matrix-output-enable");
+    assert_eq!(meaning(18).category(), "matrix-asynchronous-reset");
+    assert_eq!(meaning(ARRAY).category(), "polarity");
+    assert_eq!(meaning(ARRAY + 1).category(), "mode");
+    assert_eq!(meaning(ARRAY + CONFIG).category(), "user-signature");
+    assert_eq!(meaning(ARRAY + CONFIG + SIGNATURE).category(), "security");
+    assert_eq!(meaning(999).category(), "unknown");
+}
+
+#[test]
+fn a_description_names_the_resource_the_signal_and_the_sense() {
+    // The whole value of `oracle diff --device` over `jed diff`: a
+    // person reverse-engineering a fuse map needs the sentence, not the
+    // address.
+    assert_eq!(meaning(9).to_string(), "macrocell 0 data term in product term 1: literal !pin 2");
+    assert_eq!(
+        meaning(4).to_string(),
+        "macrocell 0 output-enable term in product term 0: literal macrocell 1 feedback"
+    );
+    assert_eq!(meaning(ARRAY + 1).to_string(), "macrocell 0 mode bit 0");
+    assert_eq!(meaning(ARRAY + CONFIG + 9).to_string(), "user-signature byte 1 bit 1");
+    assert_eq!(meaning(ARRAY + CONFIG + SIGNATURE).to_string(), "the security fuse");
+    assert_eq!(meaning(999).to_string(), "fuse 999, which this device does not have");
+}
