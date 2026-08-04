@@ -1,0 +1,12 @@
+# Pin the toolchain so local dev and CI always run the same rustc,
+# clippy, and rustfmt. Reproducibility is a project requirement, not a
+# convenience: SPEC.md §5.32 requires that the same source, compiler,
+# target database, and options produce the same fuse vector.
+#
+# To bump, edit `channel` and open a PR that also addresses any new
+# warnings the newer clippy surfaces. Keep the pinned version in
+# `.github/workflows/ci.yml` in sync in the same commit.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
