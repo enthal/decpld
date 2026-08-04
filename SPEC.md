@@ -1488,8 +1488,9 @@ Version 1 uses Rust builders rather than an external target DSL. All target stru
 pub struct FuseId(pub u32);
 
 pub struct FuseMap {
-    bits: BitVec,
-    written: BitVec,
+    bits: Vec<bool>,
+    written: Vec<bool>,
+    regions: FuseRegions,
 }
 
 pub struct FuseRegion {
@@ -1508,6 +1509,17 @@ pub enum FuseMutability {
 ```
 
 Track writes to detect conflicting encoders. Security is clear by default and requires an explicit dangerous option.
+
+Two deviations from the sketch, both deliberate:
+
+- `bits` and `written` are `Vec<bool>` rather than `BitVec`. The device layer has no packing *requirement* — `decpld-jedec` packs because the fuse checksum is defined over packed words, which is a statement about the format, not about memory. Here packing would save one byte per fuse on a part with under six thousand of them, in exchange for bit arithmetic in the one place this project can least afford an off-by-one.
+- `FuseMap` owns its `FuseRegions`. A fuse map without a classification cannot answer "may this fuse be written?", so the two are not separable without reintroducing the possibility of a map whose regions belong to a different device.
+
+`FuseRegions` is a validated type, and construction is the only way to obtain one: it checks that the regions partition `0..count` with no gap, no overlap, and no empty or backwards range. That makes §4.7's "every fuse is classified" and "fields do not overlap" hold for *every value of the type* rather than being asserted wherever someone remembers to — a device model that forgot a region cannot be built at all. Declaration order is not observable: the regions are sorted on construction, so a definition may list them in whatever order reads best (§2.5).
+
+Writing the same value twice is not a conflict. Two encoders agreeing is not a disagreement, and refusing it would make the order encoders run in observable. Writing a *different* value is refused, and the first write stands — averaging or last-writer-wins produces a device that behaves like neither design, with nothing to indicate it happened.
+
+The security fuse is not reachable through the ordinary write path at all. It has its own method, so arriving at it is a deliberate act rather than the result of an encoder sweeping a fuse range.
 
 ## 4.3 Configuration fields
 
