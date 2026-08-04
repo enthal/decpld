@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 8cc8d6253cf39b8482253aca23608ff48f353f407cb26cc5d92ea81191a87e14 # shrinks to (count, regions) = (1, [FuseRegion { name: "r0", range: 0..1, erased_value: true, mutability: Security }])
+cc a3e10a59fd662ecff44219a96af5d811d82c337a8f0f7fa9018140bf9cf6f242 # shrinks to (count, regions) = (1, [FuseRegion { name: "r0", range: 0..1, erased_value: true, mutability: Security }])
+cc 2a389f4ae975683ce2628476a4cd6b6575e9706026dbc50c9bdaa183f18b8383 # shrinks to (count, regions) = (1, [FuseRegion { name: "r0", range: 0..1, erased_value: true, mutability: Security }])
+cc 8cef0304806815a170be315c03025cf66e1afa412c7b876f25ffdf1ae1b664de # shrinks to (count, regions) = (7, [FuseRegion { name: "r0", range: 0..1, erased_value: true, mutability: Security }, FuseRegion { name: "r1", range: 1..7, erased_value: false, mutability: Programmable }])

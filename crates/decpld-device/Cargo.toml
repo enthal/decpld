@@ -1,0 +1,19 @@
+[package]
+name = "decpld-device"
+description = "Device-independent fuse map, region classification, and target traits. Knows what a fuse is; knows nothing about JEDEC syntax."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
