@@ -19,6 +19,7 @@
 //! fuse, pin, macrocell, or column, and must not.
 
 mod and_matrix;
+mod config;
 mod fuse_map;
 mod package;
 mod region;
@@ -27,6 +28,10 @@ pub use and_matrix::{
     AndMatrixSpec, DecodeError, EncodeError, LiteralSource, MatrixCellSpec, MatrixColumn,
     MatrixError, PhysicalSignalSource, ProductTermId, ProductTermRole, ProductTermSpec, decode_row,
     encode_cube,
+};
+pub use config::{
+    ConfigField, ConfigFieldError, ConfigFieldId, FeedbackSource, MacrocellMode, MacrocellSpec,
+    OutputPolarity,
 };
 pub use fuse_map::{FuseMap, FuseWriteError};
 pub use package::{
