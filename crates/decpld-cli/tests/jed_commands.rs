@@ -315,18 +315,17 @@ fn a_successful_parse_still_sends_its_warnings_to_stderr() {
     // error path already went to stderr, so a test that only used a
     // broken file would have passed against the old behaviour too.
     let dir = TempDir::new("validate-warns");
-    // `1` is a reserved identifier's neighbour — this is a genuinely
-    // unmodelled but structurally fine field, so the parse succeeds.
-    let file = dir.write("warn.jed", "\x02h*QF8*F0*L0 11110000*V0001 XXXX*\x030000");
+    let file = dir.write("warn.jed", "\x02h*QF8*F0*L0 11110000*Zzz*\x030000");
 
     let out = decpld(&["jed", "validate", &arg(&file)]);
     assert_eq!(out.status.code(), Some(0), "a file with only warnings is valid");
     assert!(stdout(&out).contains("ok — 8 fuses"), "summary on stdout: {:?}", stdout(&out));
-    assert!(
-        !stdout(&out).contains("warning"),
-        "no diagnostic may reach stdout: {:?}",
-        stdout(&out)
-    );
+    // Assert the warning is genuinely produced *and* lands on stderr.
+    // Only checking that stdout lacks it would pass against a file that
+    // never warned at all, which is how a routing test quietly stops
+    // testing routing.
+    assert!(stderr(&out).contains("warning"), "warning must reach stderr: {:?}", stderr(&out));
+    assert!(!stdout(&out).contains("warning"), "and never stdout: {:?}", stdout(&out));
 }
 
 #[test]
