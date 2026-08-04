@@ -5,3 +5,7 @@ version = 4
 [[package]]
 name = "decpld-cli"
 version = "0.0.0"
+
+[[package]]
+name = "decpld-diagnostics"
+version = "0.0.0"

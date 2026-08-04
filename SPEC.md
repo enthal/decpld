@@ -2216,6 +2216,23 @@ error[E2207]: no ATF16V8 mode can implement this design
 
 Every fit error must identify the limiting resource and actionable alternatives.
 
+### 5.18.1 Diagnostic code ranges
+
+Codes render as `E` followed by four zero-padded digits. The thousands digit selects the layer, so a code identifies where a failure came from before anyone looks it up:
+
+| Range | Layer |
+| --- | --- |
+| `0xxx` | Lexing, parsing, types, widths, signedness, literals |
+| `1xxx` | Producers, storage, clocks, pads, visibility, packages |
+| `2xxx` | Fitting, device resources, mode selection |
+| `3xxx` | JEDEC parsing, writing, checksums, fuse encoding |
+| `4xxx` | CLI, manifest, and I/O |
+| `9xxx` | Internal compiler errors — always a deCPLD bug, never a design error |
+
+Ranges `5xxx` through `8xxx` are unallocated. A code outside every allocated range is reported as unclassified rather than folded into a neighbouring layer, so a mis-numbered code stays visible.
+
+Codes are permanent. Once `E0204` means "value does not fit", it always means that: add new codes, never renumber. A code whose meaning changes silently invalidates every issue report, script, and suppression list that quotes it.
+
 ---
 
 # Part IX — Simulation and equivalence

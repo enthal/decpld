@@ -29,7 +29,7 @@ Parse, validate, canonicalize, and rewrite known JEDEC files with correct checks
 - [ ] Line-ending and whitespace variants; unknown fields preserved and reported
 - [ ] Property test: round-trip over random valid fuse vectors
 - [ ] `decpld jed validate` / `canonicalize` / `diff` wired into the CLI
-- [ ] `decpld-diagnostics`: `Span`, `FileId`, `Diagnostic`, severity, labels, notes, fixes, and stable diagnostic codes
+- [x] `decpld-diagnostics`: `Span`, `FileId`, `LineIndex`, `Diagnostic`, severity, labels, notes, fixes, and stable diagnostic codes — [#9](https://github.com/enthal/decpld/pull/9)
 
 ## M1 — ATF22V10 decoder and encoder
 
