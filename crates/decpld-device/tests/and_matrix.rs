@@ -9,7 +9,8 @@
 use decpld_device::{
     AndMatrixSpec, EncodeError, FuseId, FuseMap, FuseMutability, FuseRegion, FuseRegions,
     LiteralSource, MacrocellId, MatrixCellSpec, MatrixColumn, MatrixError, PhysicalSignalSource,
-    PinNumber, ProductTermId, ProductTermRole, ProductTermSpec, decode_row, encode_cube,
+    PinNumber, ProductTermId, ProductTermRole, ProductTermSpec, decode_row, disable_row,
+    encode_cube, row_is_never_true,
 };
 use decpld_logic::{BoolInputId, Cube, Literal, Polarity};
 
@@ -391,4 +392,71 @@ fn duplicate_source_ids_are_refused() {
 
 fn cells_of(matrix: &AndMatrixSpec) -> Vec<Vec<MatrixCellSpec>> {
     matrix.rows().iter().map(|row| matrix.row_cells(row.id).unwrap().to_vec()).collect()
+}
+
+// ---------------------------------------------------------------------
+// `disable_row` and `row_is_never_true` — SPEC.md §4.4.
+//
+// The two "empty" product-term states of a GAL are opposites, and an
+// encoder that reaches for the wrong one drives every pin high. These
+// check the one that means "off" directly, rather than through a
+// device model that would also have to be right.
+// ---------------------------------------------------------------------
+
+#[test]
+fn a_disabled_row_holds_every_literal_at_both_polarities() {
+    // "Off" is *every* link intact, not none of them: the row then
+    // asserts A & !A & B & !B & C & !C, which no input can satisfy.
+    let matrix = matrix();
+    let mut map = erased();
+    disable_row(&mut map, &matrix, ProductTermId(0)).expect("a known row");
+
+    for column in 0..COLUMNS {
+        assert_eq!(map.get(FuseId(column)), Some(false), "column {column} must be connected");
+    }
+    // And the other row is untouched — disabling is per-row.
+    for column in COLUMNS..ROWS * COLUMNS {
+        assert!(!map.is_written(FuseId(column)), "fuse {column}");
+    }
+
+    let cube = decode_row(&map, &matrix, ProductTermId(0)).expect("decodable");
+    assert!(row_is_never_true(&cube), "a disabled row must decode as never true");
+    assert_eq!(cube.literals.len(), 6, "all three sources, both polarities");
+}
+
+#[test]
+fn an_erased_row_is_the_opposite_of_a_disabled_one() {
+    // The distinction this whole encoder rests on. An erased row has
+    // no literals at all — the empty AND, constantly TRUE — so a sum
+    // that ORs it in is permanently asserted.
+    let matrix = matrix();
+    let map = erased();
+    let cube = decode_row(&map, &matrix, ProductTermId(0)).expect("decodable");
+    assert!(cube.literals.is_empty(), "an erased row holds no literals");
+    assert!(!row_is_never_true(&cube), "an erased row is constantly TRUE, not never true");
+}
+
+#[test]
+fn disabling_a_row_the_matrix_does_not_have_is_refused() {
+    let matrix = matrix();
+    let mut map = erased();
+    assert_eq!(
+        disable_row(&mut map, &matrix, ProductTermId(7)),
+        Err(EncodeError::UnknownRow { row: ProductTermId(7) })
+    );
+}
+
+#[test]
+fn disabling_a_row_that_already_holds_a_cube_is_refused_not_averaged() {
+    // `FuseMap` tracks writes so two encoders fighting over one fuse is
+    // detected. Disabling a row somebody already placed a term in is
+    // exactly that fight, and silently winning it would delete logic.
+    let matrix = matrix();
+    let mut map = erased();
+    encode_cube(&mut map, &matrix, ProductTermId(0), &Cube::new([t(A)])).expect("encodable");
+    let error = disable_row(&mut map, &matrix, ProductTermId(0)).expect_err("a second writer");
+    assert!(
+        matches!(error, EncodeError::Fuse { row: ProductTermId(0), .. }),
+        "expected a fuse conflict naming the row, got {error:?}"
+    );
 }

@@ -27,11 +27,11 @@ mod region;
 pub use and_matrix::{
     AndMatrixSpec, DecodeError, EncodeError, LiteralSource, MatrixCellSpec, MatrixColumn,
     MatrixError, PhysicalSignalSource, ProductTermId, ProductTermRole, ProductTermSpec, decode_row,
-    encode_cube,
+    disable_row, encode_cube, row_is_never_true,
 };
 pub use config::{
-    ConfigField, ConfigFieldError, ConfigFieldId, FeedbackSource, MacrocellMode, MacrocellSpec,
-    OutputPolarity,
+    ConfigField, ConfigFieldError, ConfigFieldId, FeedbackSource, LogicalOutputId, MacrocellConfig,
+    MacrocellMode, MacrocellSpec, OutputPolarity, PhysicalDesign, PlacedCube,
 };
 pub use fuse_map::{FuseMap, FuseWriteError};
 pub use package::{
