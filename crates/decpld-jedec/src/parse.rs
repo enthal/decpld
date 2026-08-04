@@ -248,7 +248,7 @@ pub fn parse_with_mode(
     // silently produced 11111111 where a sequential reader gets
     // 10000000 — a wrong fuse vector with no diagnostic, which is the
     // one outcome this crate exists to prevent.
-    let mut default_fuse = false;
+    let mut default_fuse: Option<bool> = None;
     let mut default_state_span: Option<TextRange> = None;
     let first_fuse_list = fields.iter().find(|f| f.identifier == "L").map(|f| f.span);
     for field in &fields {
@@ -266,7 +266,7 @@ pub fn parse_with_mode(
             // one meaning — refusing it would reject a file whose intent
             // is not in doubt, in modes documented as accepting what real
             // tools emit. `F0*F1*` has no meaning at all.
-            diagnostics.push(if restated == Some(default_fuse) {
+            diagnostics.push(if restated == default_fuse {
                 Diagnostic::warning(codes::DUPLICATE_DEFAULT_STATE, "more than one F field")
                     .with_label(Label::primary(at(field.span), "repeated here"))
                     .with_label(Label::secondary(at(previous), "first declared here"))
@@ -300,8 +300,8 @@ pub fn parse_with_mode(
         }
         default_state_span = Some(field.span);
         match field.body.trim() {
-            "0" => default_fuse = false,
-            "1" => default_fuse = true,
+            "0" => default_fuse = Some(false),
+            "1" => default_fuse = Some(true),
             other => diagnostics.push(
                 Diagnostic::error(
                     codes::INVALID_DEFAULT_STATE,
@@ -348,7 +348,8 @@ pub fn parse_with_mode(
         return Err(diagnostics);
     }
 
-    let mut fuses = FuseVector::new(count, default_fuse);
+    let mut fuses = FuseVector::new(count, default_fuse.unwrap_or(false));
+    let mut covered = FuseCoverage::new(count);
     let mut notes = Vec::new();
     let mut security = None;
     let mut security_span: Option<TextRange> = None;
@@ -378,7 +379,8 @@ pub fn parse_with_mode(
                     );
                     continue;
                 }
-                if apply_fuse_list(field, &mut fuses, &mut diagnostics, file).is_err() {
+                if apply_fuse_list(field, &mut fuses, &mut covered, &mut diagnostics, file).is_err()
+                {
                     // Nothing further to do — a rejected field has
                     // already pushed its own diagnostics, and `parse`
                     // returns `Err` if any of them is an error. Written
@@ -519,6 +521,30 @@ pub fn parse_with_mode(
     // sequence, and V0002 arriving before V0001 would be a real change.
     unknown_fields.sort_by_key(|field| !field.is_value_field());
 
+    // ---- Fuse coverage ----
+    //
+    // JEDEC 3A line 376: "If no F field is specified, all fuse states
+    // must be defined." Without this the parser zero-filled whatever the
+    // L fields did not reach and said nothing, inventing states that the
+    // file never gave — and `write` then emitted the `F0*` that made the
+    // invention look deliberate.
+    if default_state_span.is_none()
+        && let Some(first) = covered.first_unstated()
+    {
+        let missing = covered.unstated_count();
+        diagnostics.push(
+            Diagnostic::error(
+                codes::INCOMPLETE_FUSE_COVERAGE,
+                format!(
+                    "no F field, so every fuse state must be given, but {missing} are not \
+                     (first is fuse {first})"
+                ),
+            )
+            .with_note("JEDEC 3A: \"If no F field is specified, all fuse states must be defined\"")
+            .with_note("add an F0 or F1 field, or state the remaining fuses in an L field"),
+        );
+    }
+
     // ---- Checksums ----
 
     if let Some(declared) = fuse_checksum {
@@ -608,6 +634,7 @@ pub fn parse_with_mode(
 fn apply_fuse_list(
     field: &RawField<'_>,
     fuses: &mut FuseVector,
+    covered: &mut FuseCoverage,
     diagnostics: &mut DiagnosticBundle,
     file: FileId,
 ) -> Result<(), ()> {
@@ -721,6 +748,9 @@ fn apply_fuse_list(
         // Cannot fail: every fuse was range-checked above, against the
         // same vector, which does not change in between.
         let _ = fuses.set(fuse, state);
+        // Recorded here, with the commit, so a rejected field cannot
+        // count towards coverage — it wrote nothing.
+        covered.state(fuse);
     }
     Ok(())
 }
@@ -810,6 +840,39 @@ pub(crate) fn split_identifier(field: &str) -> (&str, &str) {
         // `NotInStandard` and it is reported, but a rewrite must still
         // emit it unchanged (issue #24).
         _ => ("", field),
+    }
+}
+
+/// Which fuses an `L` field has explicitly stated.
+///
+/// Deliberately separate from [`FuseVector`] rather than a flag on it.
+/// Coverage is a fact about how a *file* was written, not about a
+/// device's fuse states, and a vector carrying it would have to exclude
+/// it from `PartialEq` by hand — otherwise a parsed vector would compare
+/// unequal to an identical constructed one, quietly breaking `diff` and
+/// every round-trip property.
+struct FuseCoverage {
+    stated: Vec<bool>,
+}
+
+impl FuseCoverage {
+    fn new(count: u32) -> Self {
+        Self { stated: vec![false; count as usize] }
+    }
+
+    fn state(&mut self, fuse: u32) {
+        if let Some(slot) = self.stated.get_mut(fuse as usize) {
+            *slot = true;
+        }
+    }
+
+    /// The lowest fuse no `L` field mentioned, if any.
+    fn first_unstated(&self) -> Option<u32> {
+        self.stated.iter().position(|stated| !stated).map(|index| index as u32)
+    }
+
+    fn unstated_count(&self) -> usize {
+        self.stated.iter().filter(|stated| !**stated).count()
     }
 }
 
@@ -964,7 +1027,7 @@ mod tests {
         let parsed = parse_ok("\x02h*QF16*F1*L0 00000000*\x030000");
         assert!(!parsed.file.fuses.get(0).unwrap(), "L field wins where it speaks");
         assert!(parsed.file.fuses.get(8).unwrap(), "F1 fills the rest");
-        assert!(parsed.file.default_fuse);
+        assert_eq!(parsed.file.default_fuse, Some(true));
     }
 
     #[test]
@@ -1641,7 +1704,7 @@ mod review_findings {
         // The same distinction, applied to the field the previous round
         // hardened. `F0*F0*` cannot mean two things.
         let parsed = parse("\x02h*QF8*F0*F0*L0 1*\x030000", FILE).expect("one meaning");
-        assert!(!parsed.file.default_fuse);
+        assert_eq!(parsed.file.default_fuse, Some(false));
         let codes: Vec<u16> = parsed.diagnostics.iter().map(|d| d.code.as_u16()).collect();
         assert!(codes.contains(&codes::DUPLICATE_DEFAULT_STATE.as_u16()), "{codes:?}");
     }
@@ -1754,7 +1817,8 @@ mod second_review_findings {
         let mut fuses = FuseVector::new(8, false);
         let mut diagnostics = DiagnosticBundle::new();
 
-        let outcome = apply_fuse_list(&field, &mut fuses, &mut diagnostics, FILE);
+        let mut covered = FuseCoverage::new(8);
+        let outcome = apply_fuse_list(&field, &mut fuses, &mut covered, &mut diagnostics, FILE);
 
         assert!(outcome.is_err(), "a field with a bad state must be rejected");
         for fuse in 0..8 {
@@ -1778,8 +1842,133 @@ mod second_review_findings {
         let mut fuses = FuseVector::new(8, false);
         let mut diagnostics = DiagnosticBundle::new();
 
-        assert!(apply_fuse_list(&field, &mut fuses, &mut diagnostics, FILE).is_ok());
+        let mut covered = FuseCoverage::new(8);
+        assert!(apply_fuse_list(&field, &mut fuses, &mut covered, &mut diagnostics, FILE).is_ok());
         let states: Vec<bool> = fuses.iter().collect();
         assert_eq!(states, [true, false, true, true, false, false, false, false]);
+    }
+}
+
+/// A file with no `F` field. Issue #20.
+///
+/// Evidence: `jedec-3a` line 376 — "If no F field is specified, all fuse
+/// states must be defined". (The rest of that sentence, "after the QF
+/// field and before the first L field", is incoherent: fuse states are
+/// defined *by* the L fields. The clause relied on here is unambiguous;
+/// the placement clause is recorded as a defect in references.toml.)
+#[cfg(test)]
+mod missing_default_state {
+    use super::*;
+    use decpld_diagnostics::FileId;
+
+    const FILE: FileId = FileId(0);
+
+    #[test]
+    fn a_file_with_no_f_field_and_incomplete_coverage_is_refused() {
+        // Before: this parsed clean and invented twelve fuses.
+        //
+        //   \x02h*QF16*L0 1010*\x030000
+        //     -> 1010000000000000, default_fuse = false, diagnostics = []
+        //
+        // `write` then emitted `F0*`, converting "every state must be
+        // explicit" into "unlisted means 0" — a change of meaning
+        // produced by the command whose job is to preserve meaning.
+        let bundle = parse("\x02h*QF16*L0 1010*\x030000", FILE)
+            .expect_err("twelve fuses have no stated value");
+        assert!(
+            bundle.iter().any(|d| d.code == codes::INCOMPLETE_FUSE_COVERAGE),
+            "{:?}",
+            bundle.iter().map(|d| d.headline()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn the_diagnostic_says_how_many_and_where_the_first_gap_is() {
+        // "Some fuses are undefined" is useless on a 5892-fuse device.
+        let bundle = parse("\x02h*QF16*L0 1010*\x030000", FILE).expect_err("incomplete");
+        let message = bundle
+            .iter()
+            .find(|d| d.code == codes::INCOMPLETE_FUSE_COVERAGE)
+            .expect("the diagnostic")
+            .message
+            .clone();
+        assert!(message.contains("12"), "must count the gap: {message}");
+        assert!(message.contains('4'), "must name the first unstated fuse: {message}");
+    }
+
+    #[test]
+    fn a_file_with_no_f_field_but_complete_coverage_is_accepted() {
+        // Perfectly legal, and the reason this cannot simply reject
+        // every file without an F field.
+        let parsed = parse("\x02h*QF8*L0 10110001*\x030000", FILE)
+            .expect("every fuse is stated, so no default is needed");
+        assert_eq!(parsed.file.default_fuse, None, "silence is not F0");
+        let states: Vec<bool> = parsed.file.fuses.iter().collect();
+        assert_eq!(states, [true, false, true, true, false, false, false, true]);
+    }
+
+    #[test]
+    fn coverage_may_be_spread_across_several_l_fields() {
+        let parsed = parse("\x02h*QF8*L4 0001*L0 1011*\x030000", FILE)
+            .expect("order does not matter, only completeness");
+        assert_eq!(parsed.file.default_fuse, None);
+    }
+
+    #[test]
+    fn a_repeated_fuse_does_not_count_as_covering_another() {
+        // `L0 1111` twice covers fuses 0..3 and nothing else, however
+        // many times it is said.
+        let bundle = parse("\x02h*QF8*L0 1111*L0 0000*\x030000", FILE)
+            .expect_err("fuses 4..7 are still unstated");
+        assert!(bundle.iter().any(|d| d.code == codes::INCOMPLETE_FUSE_COVERAGE));
+    }
+
+    #[test]
+    fn an_f_field_means_coverage_is_not_required() {
+        // The F field exists precisely to make the unlisted fuses
+        // meaningful, so it switches the requirement off.
+        let parsed = parse("\x02h*QF16*F0*L0 1010*\x030000", FILE).expect("F0 covers the rest");
+        assert_eq!(parsed.file.default_fuse, Some(false));
+    }
+
+    #[test]
+    fn silence_and_f0_are_different_files() {
+        // The same argument the crate already makes about `G`: `None` is
+        // silence, `Some(false)` is an instruction. If these compared
+        // equal, `jed diff` would call a rewrite that invented a default
+        // "no change".
+        let silent = parse("\x02h*QF8*L0 00000000*\x030000", FILE).expect("complete").file;
+        let stated = parse("\x02h*QF8*F0*L0 00000000*\x030000", FILE).expect("parses").file;
+        assert!(!silent.describes_same_device_as(&stated));
+        assert_eq!(crate::diff(&silent, &stated).default_fuse, Some((None, Some(false))));
+    }
+
+    #[test]
+    fn a_file_with_no_f_field_round_trips_without_growing_one() {
+        // The bug's second half: `write` emitted `F0*` regardless, so a
+        // file that said "every state is explicit" came back saying
+        // "unlisted means 0".
+        for style in [crate::WriterStyle::Canonical, crate::WriterStyle::Compact] {
+            let original = parse("\x02h*QF8*L0 10110001*\x030000", FILE).expect("parses").file;
+            let written = crate::write(&original, style).expect("writes");
+            assert!(!written.contains("F0*"), "invented a default in {style:?}:\n{written}");
+            assert!(!written.contains("F1*"), "invented a default in {style:?}:\n{written}");
+
+            let reparsed = parse(&written, FILE).expect("reparses").file;
+            assert!(original.describes_same_device_as(&reparsed), "{style:?}:\n{written}");
+            assert_eq!(reparsed.default_fuse, None);
+        }
+    }
+
+    #[test]
+    fn compact_style_states_every_fuse_when_there_is_no_default() {
+        // Compact writes only fuses differing from the default. With no
+        // default there is nothing to differ from, so it must state them
+        // all — inventing an F field to compress against would change
+        // what the file says.
+        let file = parse("\x02h*QF8*L0 10110001*\x030000", FILE).expect("parses").file;
+        let compact = crate::write(&file, crate::WriterStyle::Compact).expect("writes");
+        let reparsed = parse(&compact, FILE).expect("reparses").file;
+        assert!(file.describes_same_device_as(&reparsed), "{compact}");
     }
 }

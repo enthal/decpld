@@ -39,6 +39,7 @@ authoritative_for = [
   "fuse checksum algorithm and 8-bit word packing",
   "L-field override semantics for patched files",
   "F-field cardinality and its position before the fuse lists (lines 357-377)",
+  "the rule that a file with no F field must state every fuse (line 376)",
 ]
 notes = """
 Contains worked numeric examples for both checksums. Those examples are \
@@ -74,6 +75,15 @@ are not:
    that all three are defined identifiers, and both tables agree on that. \
    Recorded because this copy's examples are already known unreliable and \
    a future reader should not have to rediscover it.
+
+4. The F-field prose at line 376 is internally incoherent: "If no F field \
+   is specified, all fuse states must be defined after the QF field and \
+   before the first L field." Fuse states are defined *by* the L fields, \
+   so "before the first L field" cannot be right; the sentence appears to \
+   conflate the coverage rule with the F field's own placement rule, which \
+   the BNF at line 357 states properly. deCPLD relies only on the \
+   unambiguous clause — no F field means every fuse state must be given — \
+   and takes the placement rule from the BNF.
 
 Identifier tables transcribed from the BNF (the normative statement) \
 rather than the prose table, and checked by a property no partial \

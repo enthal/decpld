@@ -242,7 +242,7 @@ fn summarise(name: &str, file: &decpld_jedec::JedecFile) -> String {
     format!(
         "{name}: ok — {} fuses, default {}, checksum {:04X}",
         file.fuses.len(),
-        u8::from(file.default_fuse),
+        describe_default(file.default_fuse),
         file.computed_fuse_checksum()
     )
 }
@@ -264,7 +264,8 @@ fn render_diff(delta: &JedecDiff, before: &str, after: &str) -> String {
         );
     }
     if let Some((a, b)) = delta.default_fuse {
-        let _ = writeln!(out, "default fuse state: {} -> {}", u8::from(a), u8::from(b));
+        let _ =
+            writeln!(out, "default fuse state: {} -> {}", describe_default(a), describe_default(b));
     }
     if let Some((a, b)) = delta.security {
         let _ =
@@ -289,6 +290,19 @@ fn render_diff(delta: &JedecDiff, before: &str, after: &str) -> String {
         let _ = writeln!(out, "{} fuse(s) differ", delta.fuses.len());
     }
     out
+}
+
+/// How a file's `F` field reads in a report.
+///
+/// "absent" rather than "0", because a file with no `F` field is one
+/// where every fuse state is stated explicitly — a different claim from
+/// "unlisted fuses are 0", and the distinction #20 exists to preserve.
+fn describe_default(state: Option<bool>) -> &'static str {
+    match state {
+        None => "absent (every fuse stated)",
+        Some(false) => "0",
+        Some(true) => "1",
+    }
 }
 
 fn describe_security(state: Option<bool>) -> &'static str {

@@ -83,7 +83,7 @@ fn any_jedec_file() -> impl Strategy<Value = JedecFile> {
                     String::new()
                 },
                 fuses,
-                default_fuse,
+                default_fuse: Some(default_fuse),
                 notes: Vec::new(),
                 security,
                 fuse_checksum: None,

@@ -1811,7 +1811,7 @@ Required support:
 pub struct JedecFile {
     pub design_specification: String,
     pub fuses: FuseVector,
-    pub default_fuse: bool,
+    pub default_fuse: Option<bool>,
     pub notes: Vec<String>,
     pub security: Option<bool>,
     pub fuse_checksum: Option<u16>,
@@ -1823,11 +1823,18 @@ pub struct JedecFile {
 Two deviations from the original sketch, both deliberate:
 
 - `fuse_count` and `fuses: BitVec` are collapsed into one `FuseVector`, which owns the count. A `fuse_count` that disagrees with the length of the fuse data is not a state worth being able to represent.
+- `default_fuse` is an `Option`, not a `bool`. `None` means the file carried no `F` field, which JEDEC 3A permits only when every fuse state is stated explicitly — a different claim from "unlisted fuses are 0", and one the type must be able to hold. As a plain `bool` the parser zero-filled whatever the `L` fields did not reach, said nothing about it, and the writer then emitted the `F0*` that made the invention look deliberate. Same argument as `security` below: silence is not an instruction.
 - `design_specification` is added, and is **not** optional. The free-text header between STX and the first `*` is part of the file and must survive a rewrite. JEDEC cannot express its absence — the header *is* the first field, so even `<STX>*…` has one, empty. An `Option` would let the type say something the format cannot; a round-trip property test found exactly that, with a `None` header returning as `Some("")` because there was nowhere to record the difference.
 
 `FuseVector` stores JEDEC's own 8-bit word layout: fuse *N* is bit `N % 8` of word `N / 8`, least-significant bit first. The fuse checksum is then the sum of the words, with no separate packing step that could be written backwards.
 
 The `L` field's separator between fuse number and fuse states is **required**, not merely conventional. Fuse states are `0` and `1`, which are also decimal digits, so without the separator the field is ambiguous and must be rejected rather than guessed at.
+
+**A file with no `F` field must state every fuse.** JEDEC 3A: *"If no F field is specified, all fuse states must be defined."* This is checked, not assumed: the parser records which fuses each `L` field actually stated and refuses a file that leaves any unstated, naming how many and the first one. Zero-filling the gap would invent states the file never gave, and a device whose fuse map is 12 fuses' worth of guesswork is exactly the artifact this project exists not to produce.
+
+Coverage is tracked separately from `FuseVector` rather than as a flag on it. It is a fact about how a *file* was written, not about a device's fuse states, and a vector carrying it would have to exclude it from equality by hand — otherwise a parsed vector would compare unequal to an identical constructed one, breaking `jed diff` and every round-trip property.
+
+The writer never invents a default: a file that arrived without an `F` field leaves without one. Compact style consequently states every fuse for such a file, since with no default there is nothing to differ from.
 
 **Cardinality and ordering of `F`.** JEDEC 3A gives `<fuse information> ::= [<default state>] <fuse list> {<fuse list>} [<fuse checksum>]`: at most one `F`, and it precedes every `L`. Both are enforced, because the fuse vector is built from `F` before any `L` is applied — so an `F` arriving late would retroactively become the base for fuse lists written against a different default. An `F` after an `L` is always an error: which fuses it governs depends on reading order.
 

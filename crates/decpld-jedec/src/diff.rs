@@ -31,7 +31,7 @@ pub struct JedecDiff {
     /// spurious deltas that hides the real finding.
     pub fuse_count: Option<(u32, u32)>,
     pub fuses: Vec<FuseDelta>,
-    pub default_fuse: Option<(bool, bool)>,
+    pub default_fuse: Option<(Option<bool>, Option<bool>)>,
     pub security: Option<(Option<bool>, Option<bool>)>,
     pub design_specification: Option<(String, String)>,
     pub notes: Option<(Vec<String>, Vec<String>)>,
@@ -146,7 +146,7 @@ mod tests {
         let a = file("\x02h*QF16*F0*L0 1010000000000000*\x030000");
         let b = file("\x02h*QF16*F1*L0 1010000000000000*\x030000");
         let d = diff(&a, &b);
-        assert_eq!(d.default_fuse, Some((false, true)));
+        assert_eq!(d.default_fuse, Some((Some(false), Some(true))));
     }
 
     #[test]
@@ -224,7 +224,7 @@ mod tests {
             let a = JedecFile {
                 design_specification: String::new(),
                 fuses: base,
-                default_fuse: false,
+                default_fuse: Some(false),
                 notes: Vec::new(),
                 security: None,
                 fuse_checksum: None,

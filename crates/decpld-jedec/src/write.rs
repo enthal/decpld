@@ -169,7 +169,15 @@ fn render(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError> {
         out.push_str(&join_field(&field.identifier, &field.body));
     }
 
-    out.push_str(if file.default_fuse { "F1*\n" } else { "F0*\n" });
+    // Absent stays absent. Emitting `F0*` for a file that carried no
+    // default rewrote "every state here is explicit" into "unlisted
+    // means 0" — the same class of invention the security bit is
+    // deliberately not subject to a few lines below.
+    match file.default_fuse {
+        Some(true) => out.push_str("F1*\n"),
+        Some(false) => out.push_str("F0*\n"),
+        None => {}
+    }
 
     for note in &file.notes {
         reject_unencodable("a note", note)?;
@@ -225,7 +233,16 @@ fn write_all_fuses(out: &mut String, file: &JedecFile) {
 /// Only runs that differ from the default state.
 fn write_differing_fuses(out: &mut String, file: &JedecFile) {
     let states: Vec<bool> = file.fuses.iter().collect();
-    let default = file.default_fuse;
+
+    // With no `F` field there is nothing to differ *from*, and the file
+    // is only legal if every state is stated — so compact has to state
+    // them all. Inventing a default to compress against would change
+    // what the file says, and the round-trip guard would rightly refuse
+    // the result.
+    let Some(default) = file.default_fuse else {
+        write_all_fuses(out, file);
+        return;
+    };
 
     let mut index = 0usize;
     while index < states.len() {
