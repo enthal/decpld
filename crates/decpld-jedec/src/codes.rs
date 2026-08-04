@@ -47,6 +47,13 @@ pub const INVALID_DEFAULT_STATE: DiagnosticCode = DiagnosticCode::new(3030);
 /// A `G` field was neither `G0` nor `G1`.
 pub const INVALID_SECURITY_FIELD: DiagnosticCode = DiagnosticCode::new(3031);
 
+/// A field identifier that JEDEC 3A does not define.
+pub const UNKNOWN_FIELD: DiagnosticCode = DiagnosticCode::new(3040);
+/// A field deCPLD does not model was discarded rather than retained.
+pub const FIELD_DISCARDED: DiagnosticCode = DiagnosticCode::new(3041);
+/// The file ends at ETX with no transmission checksum.
+pub const MISSING_TRANSMISSION_CHECKSUM: DiagnosticCode = DiagnosticCode::new(3042);
+
 /// Every code owned by this crate, for the uniqueness and range tests.
 pub const ALL: &[DiagnosticCode] = &[
     MISSING_STX,
@@ -64,6 +71,9 @@ pub const ALL: &[DiagnosticCode] = &[
     TRANSMISSION_CHECKSUM_MISMATCH,
     INVALID_DEFAULT_STATE,
     INVALID_SECURITY_FIELD,
+    UNKNOWN_FIELD,
+    FIELD_DISCARDED,
+    MISSING_TRANSMISSION_CHECKSUM,
 ];
 
 #[cfg(test)]

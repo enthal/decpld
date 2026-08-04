@@ -146,7 +146,21 @@ url = "https://github.com/simon-frankau/galette"
 media_type = "text/x-source"
 retrieved = "2026-08-04"
 authoritative_for = ["independent cross-check of GAL16V8 / GAL22V10 fuse layout and JEDEC output"]
-notes = "Cite a specific commit SHA and file path when used as evidence for a mapping."
+notes = """
+Cite a specific commit SHA and file path when used as evidence for a mapping.
+
+USED: both JEDEC checksum algorithms are cross-checked against Galette \
+output. Its GAL16V8 fixtures (redistributed under MIT in \
+targets/fixtures/jedec/) declare C403e and a transmission checksum of \
+999d. deCPLD parses the L fields and recomputes both with code that \
+shares nothing with Galette, and agrees on each. Over 2194 fuses that \
+also confirms fuse *placement*, not merely the arithmetic.
+
+Evidence level for the JEDEC checksum algorithms and the 8-bit word \
+packing: OpenSourceCrossChecked. They were already \
+DifferentiallyVerified against the standard's worked examples; Galette \
+is the independent second witness.\
+"""
 
 [[reference]]
 id = "galasm"

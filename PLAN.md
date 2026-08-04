@@ -24,9 +24,9 @@ Parse, validate, canonicalize, and rewrite known JEDEC files with correct checks
 
 - [x] `decpld-jedec` crate: `JedecFile` model, STX/ETX framing, `QF` / `F` / `L` / `C` / `N` / `G` fields — [#11](https://github.com/enthal/decpld/pull/11)
 - [x] Fuse checksum and transmission checksum, from the standard's own worked examples — [#10](https://github.com/enthal/decpld/pull/10)
-- [ ] Parser modes: strict, compatible, preserve-unknown
+- [x] Parser modes: strict, compatible, preserve-unknown — [#12](https://github.com/enthal/decpld/pull/12)
 - [ ] Writer styles: canonical, compact, WinCUPL-comparable
-- [ ] Line-ending and whitespace variants; unknown fields preserved and reported
+- [x] Line-ending and whitespace variants; unknown fields preserved and reported — [#12](https://github.com/enthal/decpld/pull/12)
 - [ ] Property test: round-trip over random valid fuse vectors
 - [ ] `decpld jed validate` / `canonicalize` / `diff` wired into the CLI
 - [x] `decpld-diagnostics`: `Span`, `FileId`, `LineIndex`, `Diagnostic`, severity, labels, notes, fixes, and stable diagnostic codes — [#9](https://github.com/enthal/decpld/pull/9)
