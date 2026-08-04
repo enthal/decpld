@@ -40,7 +40,7 @@ M0 hardening, from the sub-agent reviews over the milestone's diff:
 - [x] A file with no `F` field no longer silently means `F0` — [#26](https://github.com/enthal/decpld/pull/26)
 - [x] `apply_fuse_list` applies atomically — [#25](https://github.com/enthal/decpld/pull/25)
 - [x] Fields with no identifier reported and preserved rather than silently deleted — [#25](https://github.com/enthal/decpld/pull/25)
-- [ ] SPEC.md sync and property-test coverage gaps — [#22](https://github.com/enthal/decpld/issues/22), [#23](https://github.com/enthal/decpld/issues/23)
+- [x] SPEC.md sync and property-test coverage gaps — [#27](https://github.com/enthal/decpld/pull/27)
 
 ## M1 — ATF22V10 decoder and encoder
 

@@ -46,8 +46,14 @@ enum JedCommand {
     Validate {
         file: PathBuf,
         /// How tolerant to be of what the file contains
-        #[arg(long, value_enum, default_value_t = Mode::PreserveUnknown)]
-        mode: Mode,
+        ///
+        /// Named `--strictness` rather than `--mode` because `--mode`
+        /// already means an ATF16V8 global mode (SPEC.md §5.16.3), which
+        /// is the datasheet's own word for registered/complex/simple.
+        /// `jed inspect --device` will report one, so the two would
+        /// otherwise collide on a single command.
+        #[arg(long, value_enum, default_value_t = Strictness::PreserveUnknown)]
+        strictness: Strictness,
     },
 
     /// Rewrite a JEDEC file in a canonical form, repairing its checksums
@@ -66,7 +72,7 @@ enum JedCommand {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
-enum Mode {
+enum Strictness {
     /// Everything must conform to JEDEC 3A
     Strict,
     /// Accept what real tools emit; discard fields deCPLD does not model
@@ -83,12 +89,12 @@ enum Style {
     Compact,
 }
 
-impl From<Mode> for ParserMode {
-    fn from(mode: Mode) -> Self {
-        match mode {
-            Mode::Strict => Self::Strict,
-            Mode::Compatible => Self::Compatible,
-            Mode::PreserveUnknown => Self::PreserveUnknown,
+impl From<Strictness> for ParserMode {
+    fn from(strictness: Strictness) -> Self {
+        match strictness {
+            Strictness::Strict => Self::Strict,
+            Strictness::Compatible => Self::Compatible,
+            Strictness::PreserveUnknown => Self::PreserveUnknown,
         }
     }
 }
@@ -117,7 +123,9 @@ const TROUBLE: u8 = 2;
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Jed(JedCommand::Validate { file, mode }) => validate(&file, mode.into()),
+        Command::Jed(JedCommand::Validate { file, strictness }) => {
+            validate(&file, strictness.into())
+        }
         Command::Jed(JedCommand::Canonicalize { file, output, style }) => {
             canonicalize(&file, output.as_deref(), style.into())
         }

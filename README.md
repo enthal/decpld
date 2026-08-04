@@ -164,6 +164,8 @@ decpld: broken.jed: not a valid JEDEC file
 
 Diagnostics go to **stderr** and results to **stdout**, whether or not the file was accepted — so `decpld jed canonicalize in.jed > out.jed` produces a fuse map a programmer can read, never one with a warning glued to the front.
 
+`decpld jed validate --strictness strict` asks the stricter question — *is this file actually conformant JEDEC 3A?* — rather than *can I read it?*. `decpld jed canonicalize --style compact` states only the fuses that differ from the default instead of all of them.
+
 `decpld jed canonicalize` rewrites a file in a stable, diffable form and **repairs its checksums** — a file carrying `C0000` ("not computed") comes out with a real one.
 
 `decpld jed diff` compares two files by *fuse vector*, not by text, so reformatting is not a difference:
