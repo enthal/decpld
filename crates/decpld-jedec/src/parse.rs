@@ -190,11 +190,68 @@ pub fn parse_with_mode(
         }
     }
 
+    // JEDEC 3A: `<fuse information> ::= [<default state>] <fuse list>
+    // {<fuse list>} [<fuse checksum>]` — at most ONE `F`, and it
+    // precedes the fuse lists.
+    //
+    // Both rules are enforced because the vector is built from `F`
+    // before any `L` is applied, so a second or late `F` would
+    // retroactively become the base for fuse lists that were written
+    // against a different default. `\x02h*QF8*F0*L0 1*F1*\x030000`
+    // silently produced 11111111 where a sequential reader gets
+    // 10000000 — a wrong fuse vector with no diagnostic, which is the
+    // one outcome this crate exists to prevent.
     let mut default_fuse = false;
+    let mut default_state_span: Option<TextRange> = None;
+    let first_fuse_list = fields.iter().find(|f| f.identifier == "L").map(|f| f.span);
     for field in &fields {
         if field.identifier != "F" {
             continue;
         }
+        let restated = match field.body.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        };
+        if let Some(previous) = default_state_span {
+            // Repetition and contradiction are different facts, and only
+            // one of them makes the file unreadable. `F0*F0*` has exactly
+            // one meaning — refusing it would reject a file whose intent
+            // is not in doubt, in modes documented as accepting what real
+            // tools emit. `F0*F1*` has no meaning at all.
+            diagnostics.push(if restated == Some(default_fuse) {
+                Diagnostic::warning(codes::DUPLICATE_DEFAULT_STATE, "more than one F field")
+                    .with_label(Label::primary(at(field.span), "repeated here"))
+                    .with_label(Label::secondary(at(previous), "first declared here"))
+                    .with_note("JEDEC 3A allows at most one default-state field")
+                    .with_note("both state the same default, so the file still has one meaning")
+            } else {
+                Diagnostic::error(
+                    codes::CONTRADICTORY_DEFAULT_STATE,
+                    "F fields disagree about the default fuse state",
+                )
+                .with_label(Label::primary(at(field.span), "declared here"))
+                .with_label(Label::secondary(at(previous), "but declared differently here"))
+                .with_note("the default state governs every fuse no L field mentions, so this changes the fuse vector")
+            });
+        }
+        // Checked independently of the duplicate rule, not as its
+        // `else`: a file can break both at once, and each names a
+        // different thing the author got wrong.
+        if let Some(list) = first_fuse_list
+            && field.span.start > list.start
+        {
+            diagnostics.push(
+                Diagnostic::error(
+                    codes::DEFAULT_STATE_AFTER_FUSE_LIST,
+                    "F field appears after an L field",
+                )
+                .with_label(Label::primary(at(field.span), "default state declared here"))
+                .with_label(Label::secondary(at(list), "but this fuse list came first"))
+                .with_note("JEDEC 3A places the default state before the fuse lists; after them, which fuses it governs depends on reading order"),
+            );
+        }
+        default_state_span = Some(field.span);
         match field.body.trim() {
             "0" => default_fuse = false,
             "1" => default_fuse = true,
@@ -224,9 +281,34 @@ pub fn parse_with_mode(
         return Err(diagnostics);
     };
 
+    // `QF` alone drives allocation, so an unbounded value turns a
+    // 19-byte file into hundreds of megabytes (CLAUDE.md's fuzz rule:
+    // malformed input must never allocate unbounded). The ceiling is
+    // device-independent by design — this crate knows nothing about
+    // devices — and sits about a thousandfold above the ATF22V10's
+    // ~5900 fuses, so no real part comes close.
+    const MAX_FUSES: u32 = 8_000_000;
+    if count > MAX_FUSES {
+        diagnostics.push(
+            Diagnostic::error(
+                codes::FUSE_COUNT_TOO_LARGE,
+                format!(
+                    "QF declares {count} fuses, more than the {MAX_FUSES} deCPLD will allocate"
+                ),
+            )
+            .with_note("this is a guard against malformed input, not a device limit"),
+        );
+        return Err(diagnostics);
+    }
+
     let mut fuses = FuseVector::new(count, default_fuse);
     let mut notes = Vec::new();
     let mut security = None;
+    let mut security_span: Option<TextRange> = None;
+    // A repeated `C` deliberately has no rule of its own: the checksum is
+    // recomputed on every write, and a `C` disagreeing with the fuse data
+    // already fails FUSE_CHECKSUM_MISMATCH below. Unlike `F` and `G`, a
+    // duplicate cannot change what the file *means*.
     let mut fuse_checksum = None;
     let mut unknown_fields = Vec::new();
     let mut seen_fuse_count = false;
@@ -262,17 +344,53 @@ pub fn parse_with_mode(
                 ),
             },
             "N" => notes.push(field.body.trim().to_owned()),
-            "G" => match field.body.trim() {
-                "0" => security = Some(false),
-                "1" => security = Some(true),
-                other => diagnostics.push(
-                    Diagnostic::error(
-                        codes::INVALID_SECURITY_FIELD,
-                        format!("security fuse must be 0 or 1, found `{other}`"),
-                    )
-                    .with_label(Label::primary(at(field.span), "expected `G0*` or `G1*`")),
-                ),
-            },
+            "G" => {
+                let state = match field.body.trim() {
+                    "0" => Some(false),
+                    "1" => Some(true),
+                    other => {
+                        diagnostics.push(
+                            Diagnostic::error(
+                                codes::INVALID_SECURITY_FIELD,
+                                format!("security fuse must be 0 or 1, found `{other}`"),
+                            )
+                            .with_label(Label::primary(at(field.span), "expected `G0*` or `G1*`")),
+                        );
+                        None
+                    }
+                };
+                // The same rule as `F`, and it matters more here. The
+                // security fuse is irreversible, and CLAUDE.md makes
+                // setting it require two explicit CLI flags — so
+                // resolving `G0*G1*` by last-writer-wins would infer
+                // "permanently lock this part" from a file that cannot
+                // make up its mind, walking straight around that gate.
+                match (security, state, security_span) {
+                    (Some(previous), Some(new), Some(first)) if previous != new => diagnostics
+                        .push(
+                            Diagnostic::error(
+                                codes::CONTRADICTORY_SECURITY_FIELD,
+                                "G fields disagree about the security fuse",
+                            )
+                            .with_label(Label::primary(at(field.span), "declared here"))
+                            .with_label(Label::secondary(at(first), "but declared differently here"))
+                            .with_note(
+                                "the security fuse permanently prevents reading the device back, so this is never guessed",
+                            ),
+                        ),
+                    (Some(_), Some(_), Some(first)) => diagnostics.push(
+                        Diagnostic::warning(codes::DUPLICATE_SECURITY_FIELD, "more than one G field")
+                            .with_label(Label::primary(at(field.span), "repeated here"))
+                            .with_label(Label::secondary(at(first), "first declared here"))
+                            .with_note("both state the same value, so the file still has one meaning"),
+                    ),
+                    _ => {}
+                }
+                if let Some(new) = state {
+                    security = Some(new);
+                    security_span.get_or_insert(field.span);
+                }
+            }
             other => {
                 let standard = is_standard_identifier(other);
                 if !standard {
@@ -1016,5 +1134,116 @@ mod tests {
         let span = diagnostic.primary_span().expect("a primary span");
         // The caret must land on the `2`, not on the field or the file.
         assert_eq!(&text[span.range], "2");
+    }
+}
+
+#[cfg(test)]
+mod review_findings {
+    use super::*;
+    use crate::codes;
+    use decpld_diagnostics::FileId;
+
+    const FILE: FileId = FileId(0);
+
+    fn codes_of(text: &str) -> Vec<u16> {
+        match parse(text, FILE) {
+            Ok(parsed) => panic!("expected rejection, got {} fuses", parsed.file.fuses.len()),
+            Err(bundle) => bundle.iter().map(|d| d.code.as_u16()).collect(),
+        }
+    }
+
+    #[test]
+    fn a_late_default_state_field_is_rejected_for_being_late() {
+        // Found by review with this exact input. It parsed with ZERO
+        // diagnostics and produced 11111111, where a reader honouring
+        // the F0 that actually precedes the L gets 10000000 — a wrong
+        // fuse vector, silently, which is the outcome this crate exists
+        // to prevent.
+        //
+        // Two separate faults here, and the file commits both: the F is
+        // a repeat *and* it follows an L. Asserting the ordering code is
+        // what this test is named for; the second-review tests below
+        // cover repetition on its own.
+        assert!(
+            codes_of("\x02h*QF8*F0*L0 1*F1*\x030000")
+                .contains(&codes::DEFAULT_STATE_AFTER_FUSE_LIST.as_u16())
+        );
+    }
+
+    #[test]
+    fn a_lone_default_state_after_a_fuse_list_is_rejected() {
+        // No repetition to hide behind: one F field, in the wrong place.
+        assert!(
+            codes_of("\x02h*QF8*L0 1*F1*\x030000")
+                .contains(&codes::DEFAULT_STATE_AFTER_FUSE_LIST.as_u16())
+        );
+    }
+
+    #[test]
+    fn two_security_fields_that_disagree_are_rejected() {
+        // Found by the second review round. This parsed with ZERO
+        // diagnostics and resolved to `Some(true)` by last-writer-wins:
+        // an internally contradictory file silently deciding to
+        // permanently lock the part.
+        //
+        // The `F` fix in the previous round argued that a field whose
+        // meaning depends on reading order is "the one outcome this
+        // crate exists to prevent". `G` is the same shape and carries
+        // more weight — CLAUDE.md gives the security fuse a two-flag
+        // confirmation at the CLI precisely because it is irreversible,
+        // and inferring it from a self-contradictory file walks around
+        // that gate entirely.
+        //
+        // `write` cannot catch this: it emits one `G1*`, which reparses
+        // to exactly what the parser decided.
+        assert!(
+            codes_of("\x02h*QF8*F0*G0*G1*\x030000")
+                .contains(&codes::CONTRADICTORY_SECURITY_FIELD.as_u16())
+        );
+    }
+
+    #[test]
+    fn two_security_fields_that_agree_are_a_warning_not_an_error() {
+        // Redundancy and contradiction are different facts. `G1*G1*` is
+        // a grammar violation with exactly one possible meaning, so
+        // refusing it would reject a file whose intent is not in doubt
+        // — and the lenient modes are documented as accepting what real
+        // tools emit.
+        let parsed = parse(FILE_WITH_REPEATED_SECURITY, FILE).expect("one unambiguous meaning");
+        assert_eq!(parsed.file.security, Some(true));
+        let codes: Vec<u16> = parsed.diagnostics.iter().map(|d| d.code.as_u16()).collect();
+        assert!(codes.contains(&codes::DUPLICATE_SECURITY_FIELD.as_u16()), "{codes:?}");
+    }
+
+    const FILE_WITH_REPEATED_SECURITY: &str = "\x02h*QF8*F0*G1*G1*\x030000";
+
+    #[test]
+    fn two_default_state_fields_that_agree_are_a_warning_not_an_error() {
+        // The same distinction, applied to the field the previous round
+        // hardened. `F0*F0*` cannot mean two things.
+        let parsed = parse("\x02h*QF8*F0*F0*L0 1*\x030000", FILE).expect("one meaning");
+        assert!(!parsed.file.default_fuse);
+        let codes: Vec<u16> = parsed.diagnostics.iter().map(|d| d.code.as_u16()).collect();
+        assert!(codes.contains(&codes::DUPLICATE_DEFAULT_STATE.as_u16()), "{codes:?}");
+    }
+
+    #[test]
+    fn two_default_state_fields_that_disagree_are_rejected() {
+        assert!(
+            codes_of("\x02h*QF8*F0*F1*L0 1*\x030000")
+                .contains(&codes::CONTRADICTORY_DEFAULT_STATE.as_u16())
+        );
+    }
+
+    #[test]
+    fn an_absurd_fuse_count_is_refused_rather_than_allocated() {
+        // A 19-byte file allocated 50 MB; QF4294967295 allocated 512 MB,
+        // and writing it would have collected a 4 GB Vec<bool>.
+        assert!(
+            codes_of("\x02h*QF4294967295*F0*\x030000")
+                .contains(&codes::FUSE_COUNT_TOO_LARGE.as_u16())
+        );
+        // A real device is nowhere near the ceiling.
+        assert!(parse("\x02h*QF5892*F0*\x030000", FILE).is_ok());
     }
 }

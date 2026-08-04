@@ -158,8 +158,11 @@ design.jed: ok — 2194 fuses, default 0, checksum 403E
 $ decpld jed validate broken.jed
 broken.jed:4:7: error[E3012]: fuse state must be 0 or 1, found `2`
   L0 1012*
-        ^
+        ^ not a fuse state
+decpld: broken.jed: not a valid JEDEC file
 ```
+
+Diagnostics go to **stderr** and results to **stdout**, whether or not the file was accepted — so `decpld jed canonicalize in.jed > out.jed` produces a fuse map a programmer can read, never one with a warning glued to the front.
 
 `decpld jed canonicalize` rewrites a file in a stable, diffable form and **repairs its checksums** — a file carrying `C0000` ("not computed") comes out with a real one.
 

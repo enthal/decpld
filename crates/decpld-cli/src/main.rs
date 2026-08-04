@@ -157,14 +157,13 @@ fn validate(path: &Path, mode: ParserMode) -> Result<u8, Failure> {
 
     match parse_with_mode(&source, FileId(0), mode) {
         Ok(parsed) => {
-            print!("{}", render::bundle(&parsed.diagnostics, &name, &source));
+            // Diagnostics go to stderr whether or not the parse
+            // succeeded. Which stream carries a diagnostic must depend on
+            // it being a diagnostic, not on the luck of the parse — a
+            // warning on stdout corrupts `decpld jed validate f | ...`.
+            eprint!("{}", render::bundle(&parsed.diagnostics, &name, &source));
             let file = parsed.file;
-            println!(
-                "{name}: ok — {} fuses, default {}, checksum {:04X}",
-                file.fuses.len(),
-                u8::from(file.default_fuse),
-                file.computed_fuse_checksum()
-            );
+            println!("{}", summarise(&name, &file));
             Ok(OK)
         }
         Err(bundle) => {
@@ -186,6 +185,14 @@ fn canonicalize(path: &Path, output: Option<&Path>, style: WriterStyle) -> Resul
             Failure::trouble(format!("{name}: not a valid JEDEC file"))
         })?;
 
+    // Every command reports what the parse found. Three commands over
+    // one file disagreeing about its diagnostics is the same class of
+    // defect as `decpld check` disagreeing with an editor squiggle
+    // (CLAUDE.md → the one architectural rule) — and `canonicalize` is
+    // exactly where "I did not recognise this field but rewrote it
+    // anyway" needs saying.
+    eprint!("{}", render::bundle(&parsed.diagnostics, &name, &source));
+
     let text = write(&parsed.file, style).map_err(|e| Failure::trouble(format!("{name}: {e}")))?;
 
     match output {
@@ -200,11 +207,19 @@ fn diff(before: &Path, after: &Path) -> Result<u8, Failure> {
     let (left_source, right_source) = (read(before)?, read(after)?);
     let (left_name, right_name) = (before.display().to_string(), after.display().to_string());
 
+    // Each file's diagnostics are emitted with that file, before the
+    // next one is touched. Collecting them at the end lost the left
+    // file's warnings whenever the right file failed to parse — the `?`
+    // returned first — so a run that reported nothing about a.jed could
+    // not be told from a run where a.jed was clean.
     let parse_one = |source: &str, name: &str| {
-        parse_with_mode(source, FileId(0), ParserMode::PreserveUnknown).map_err(|bundle| {
-            eprint!("{}", render::bundle(&bundle, name, source));
-            Failure::trouble(format!("{name}: not a valid JEDEC file"))
-        })
+        let result = parse_with_mode(source, FileId(0), ParserMode::PreserveUnknown);
+        let bundle = match &result {
+            Ok(parsed) => &parsed.diagnostics,
+            Err(bundle) => bundle,
+        };
+        eprint!("{}", render::bundle(bundle, name, source));
+        result.map_err(|_| Failure::trouble(format!("{name}: not a valid JEDEC file")))
     };
 
     let left = parse_one(&left_source, &left_name)?.file;
@@ -218,6 +233,18 @@ fn diff(before: &Path, after: &Path) -> Result<u8, Failure> {
 
     print!("{}", render_diff(&delta, &left_name, &right_name));
     Ok(FINDINGS)
+}
+
+/// One-line summary of a file that parsed. Pure, so it is testable
+/// without spawning a process (CLAUDE.md: logic that can be tested
+/// without going through the CLI must not live inside a CLI function).
+fn summarise(name: &str, file: &decpld_jedec::JedecFile) -> String {
+    format!(
+        "{name}: ok — {} fuses, default {}, checksum {:04X}",
+        file.fuses.len(),
+        u8::from(file.default_fuse),
+        file.computed_fuse_checksum()
+    )
 }
 
 /// Render a diff. Pure, so the formatting is testable without files.
@@ -296,6 +323,19 @@ mod tests {
         let out = render_diff(&delta, "a.jed", "b.jed");
         assert!(out.contains("fuse count: 16 -> 32"), "{out}");
         assert!(out.contains("not compared"), "{out}");
+    }
+
+    #[test]
+    fn the_summary_reports_count_default_and_checksum() {
+        // `summarise` was extracted as a pure function precisely so it
+        // could be tested without spawning a process, and then was not
+        // tested. The default state is printed as a digit because that
+        // is how the `F` field spells it.
+        let file =
+            decpld_jedec::parse("\x02h*QF16*F1*L0 0*\x030000", FileId(0)).expect("parses").file;
+        let out = summarise("d.jed", &file);
+        assert!(out.starts_with("d.jed: ok — 16 fuses, default 1, checksum "), "{out}");
+        assert!(out.ends_with(&format!("{:04X}", file.computed_fuse_checksum())), "{out}");
     }
 
     #[test]

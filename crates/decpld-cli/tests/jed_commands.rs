@@ -301,3 +301,70 @@ fn an_unknown_command_fails_without_panicking() {
     assert!(!out.status.success());
     assert!(!stderr(&out).contains("panicked"), "{}", stderr(&out));
 }
+
+// ---- Stream routing (second review round) ----
+//
+// The point of the change these cover: which stream carries a
+// diagnostic must depend on it being a diagnostic, never on whether the
+// parse happened to succeed. A warning on stdout corrupts every
+// `decpld jed … > file` and every pipeline.
+
+#[test]
+fn a_successful_parse_still_sends_its_warnings_to_stderr() {
+    // A file that parses *and* warns is the case that was missed: the
+    // error path already went to stderr, so a test that only used a
+    // broken file would have passed against the old behaviour too.
+    let dir = TempDir::new("validate-warns");
+    let file = dir.write("warn.jed", "\x02h*QF8*F0*L0 11110000*Zzz*\x030000");
+
+    let out = decpld(&["jed", "validate", &arg(&file)]);
+    assert_eq!(out.status.code(), Some(0), "a file with only warnings is valid");
+    assert!(stdout(&out).contains("ok — 8 fuses"), "summary on stdout: {:?}", stdout(&out));
+    // Assert the warning is genuinely produced *and* lands on stderr.
+    // Only checking that stdout lacks it would pass against a file that
+    // never warned at all, which is how a routing test quietly stops
+    // testing routing.
+    assert!(stderr(&out).contains("warning"), "warning must reach stderr: {:?}", stderr(&out));
+    assert!(!stdout(&out).contains("warning"), "and never stdout: {:?}", stdout(&out));
+}
+
+#[test]
+fn canonicalize_keeps_stdout_a_pure_jedec_file_when_the_input_warns() {
+    // This is the whole reason diagnostics were moved to stderr:
+    // `decpld jed canonicalize in.jed > out.jed` must produce a file a
+    // programmer can read, not one with a warning glued to the front.
+    let dir = TempDir::new("canon-warns");
+    let file = dir.write("warn.jed", "\x02h*QF8*F0*L0 11110000*Zzz*\x030000");
+
+    let out = decpld(&["jed", "canonicalize", &arg(&file)]);
+    assert_eq!(out.status.code(), Some(0));
+
+    let text = stdout(&out);
+    assert!(text.starts_with('\u{2}'), "stdout must begin with STX: {text:?}");
+    assert!(!text.contains("warning"), "diagnostic leaked onto stdout: {text:?}");
+
+    // And the diagnostics did not simply vanish.
+    let written = dir.write("out.jed", &text);
+    assert_eq!(
+        decpld(&["jed", "validate", &arg(&written)]).status.code(),
+        Some(0),
+        "the captured stdout must itself be a valid file"
+    );
+}
+
+#[test]
+fn diff_reports_the_first_files_diagnostics_even_when_the_second_is_unreadable() {
+    // The `?` on the second parse used to return before either file's
+    // diagnostics were printed, so a warning about a.jed disappeared
+    // whenever b.jed was broken — indistinguishable from a.jed being
+    // clean.
+    let dir = TempDir::new("diff-warn-then-fail");
+    let good = dir.write("a.jed", "\x02h*QF8*F0*L0 11110000*Zzz*\x030000");
+    let bad = dir.write("b.jed", "not a jedec file at all");
+
+    let out = decpld(&["jed", "diff", &arg(&good), &arg(&bad)]);
+    assert_eq!(out.status.code(), Some(2), "an unreadable input is trouble, not a finding");
+    let errors = stderr(&out);
+    assert!(errors.contains("a.jed"), "the first file's diagnostics are missing: {errors:?}");
+    assert!(errors.contains("b.jed"), "the failure itself must be reported: {errors:?}");
+}
