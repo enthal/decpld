@@ -370,7 +370,7 @@ pub fn parse_with_mode(
 
     Ok(Parsed {
         file: JedecFile {
-            design_specification,
+            design_specification: design_specification.unwrap_or_default(),
             fuses,
             default_fuse,
             notes,
@@ -578,7 +578,7 @@ mod tests {
     fn parses_a_minimal_file() {
         let parsed = parse_ok(&minimal());
         assert_eq!(parsed.file.fuses.len(), 8);
-        assert_eq!(parsed.file.design_specification.as_deref(), Some("minimal"));
+        assert_eq!(parsed.file.design_specification, "minimal");
         assert!(parsed.file.fuses.get(0).unwrap());
         assert!(!parsed.file.fuses.get(1).unwrap());
         assert!(parsed.file.fuses.get(2).unwrap());
@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn the_design_specification_may_be_empty() {
         let parsed = parse_ok("\x02*QF8*F0*L0 00000000*\x030000");
-        assert_eq!(parsed.file.design_specification.as_deref(), Some(""));
+        assert_eq!(parsed.file.design_specification, "");
     }
 
     #[test]
@@ -629,7 +629,7 @@ mod tests {
         // the terminating asterisk.
         let text = "\x02File for PLD 12S8\r\n6809 memory decode\r\nJoe Engineer*QF8*F0*L0 00000000*\x030000";
         let parsed = parse_ok(text);
-        let header = parsed.file.design_specification.unwrap();
+        let header = parsed.file.design_specification;
         assert!(header.contains("Joe Engineer"), "got {header:?}");
         assert!(header.contains("6809 memory decode"));
     }

@@ -34,7 +34,7 @@ fn parses_a_real_galette_file() {
     assert!(!parsed.file.default_fuse, "F0");
     assert_eq!(parsed.file.security, Some(false), "G0");
 
-    let header = parsed.file.design_specification.expect("a header");
+    let header = parsed.file.design_specification;
     assert!(header.contains("Galette"), "header should survive: {header:?}");
     assert!(header.contains("GAL16V8"));
 }
