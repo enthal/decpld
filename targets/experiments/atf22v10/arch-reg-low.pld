@@ -1,0 +1,16 @@
+Name     arch-reg-low;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Both varied, to complete the 2x2. */
+PIN 1 = clk;
+PIN 2 = i0;
+PIN 23 = o0;
+
+!o0.d = i0;

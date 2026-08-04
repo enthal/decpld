@@ -1,0 +1,18 @@
+Name     fb17;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Pin 17 drives pin 23, so pin 23's data term names
+   pin 17's FEEDBACK column rather than an input column. */
+PIN 2  = i0;
+PIN 17 = q;
+PIN 23 = o0;
+
+q  = i0;
+o0 = q;

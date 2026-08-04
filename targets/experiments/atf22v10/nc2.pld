@@ -1,0 +1,16 @@
+Name     nc2;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Same as in2 but complemented, to locate the
+   complement column relative to the true one. */
+PIN 2 = i0;
+PIN 23 = o0;
+
+o0 = !i0;

@@ -2150,6 +2150,14 @@ pub struct CuplFixture {
 
 For sequential fixtures, generate D truth tables from an independent expected-behavior model, not by invoking the deCPLD compiler.
 
+**The oracle's output is never committed, and CI never runs the oracle.**
+
+What goes into the repository is the *input* and the *recipe*: the generated `.pld` sources, the exact command line, and the run metadata of §5.9. That is everything needed to reproduce or audit a claim, and it redistributes nothing proprietary — the sources are ours, and WinCUPL's `.jed`, `.doc`, `.lst` and `.abs` files stay in a scratch directory. The claim itself is recorded in `targets/evidence/`, and the constants it justifies live in the device model citing it.
+
+CI verifies deCPLD against *itself* — encode/decode round-trips, region partition invariants, minimisation equivalence — none of which need an oracle. A CI job that reached for WinCUPL would contradict the product, since compiling must never require WinCUPL, Wine, or Windows. The experiment runner is developer-only, in the same spirit as `targets/evidence/verify-references.sh`.
+
+This also means a mapping is not defended by a golden file that happens to match. It is defended by an evidence record naming the experiment that established it, which a reader can re-run — and by deCPLD's own invariants, which hold whether or not an oracle is installed.
+
 ## 5.15 Hardware validation
 
 A mapping is not fully trusted only because WinCUPL agrees.
