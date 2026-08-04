@@ -58,10 +58,21 @@ impl FuseVector {
         self.len == 0
     }
 
+    /// Whether this device has such a fuse.
+    ///
+    /// The one statement of the bound. `set` checks it and so does the
+    /// JEDEC parser, which must know before it commits anything — two
+    /// copies of one fact about a device's size is exactly the kind of
+    /// duplication that drifts.
+    #[must_use]
+    pub fn contains(&self, fuse: u32) -> bool {
+        fuse < self.len
+    }
+
     /// The state of one fuse, or `None` if it does not exist.
     #[must_use]
     pub fn get(&self, fuse: u32) -> Option<bool> {
-        (fuse < self.len).then(|| self.bit(fuse))
+        self.contains(fuse).then(|| self.bit(fuse))
     }
 
     /// Set one fuse.
@@ -73,7 +84,7 @@ impl FuseVector {
     /// Repeated writes are allowed and the last wins — JEDEC 3A, Fuse
     /// List Field, which is how patched files work.
     pub fn set(&mut self, fuse: u32, state: bool) -> Result<(), FuseError> {
-        if fuse >= self.len {
+        if !self.contains(fuse) {
             return Err(FuseError::OutOfRange { fuse, count: self.len });
         }
         let mask = 1u8 << (fuse % 8);

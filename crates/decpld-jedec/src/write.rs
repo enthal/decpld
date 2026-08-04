@@ -1,5 +1,6 @@
 //! Writing a [`JedecFile`] back out.
 
+use crate::is_field_character;
 use crate::model::{JedecField, JedecFile};
 use crate::transmission_checksum;
 
@@ -270,20 +271,6 @@ fn reject_unencodable_field(field: &JedecField) -> Result<(), WriteError> {
         });
     }
     Ok(())
-}
-
-/// JEDEC 3A's `<field character>` class, lines 158-160:
-///
-/// ```text
-/// <field character> ::= <ASCII 20 hex ... 29 hex>
-///                   |   <ASCII 2B hex ... 7E hex>
-///                   |   <carriage return> | <line feed>
-/// ```
-///
-/// The gap at `0x2A` is the field terminator `*`. Evidence: `jedec-3a`
-/// (sha256 `9207f92b…` in `targets/evidence/references.toml`).
-fn is_field_character(ch: char) -> bool {
-    matches!(ch, '\u{20}'..='\u{29}' | '\u{2B}'..='\u{7E}' | '\r' | '\n')
 }
 
 /// Refuse text JEDEC cannot spell.
@@ -743,6 +730,24 @@ mod encodability {
         let written = write(&file, WriterStyle::Canonical).expect("all legal characters");
         let reparsed = parse(&written, FILE).expect("reparses").file;
         assert_eq!(reparsed.notes[0], note, "every legal character must survive");
+    }
+
+    #[test]
+    fn carriage_return_and_line_feed_are_in_the_class_too() {
+        // The two non-contiguous members, and the ones a range-based
+        // implementation is likeliest to drop. JEDEC 3A lines 232-233
+        // positively encourages them: "carriage returns and line feeds
+        // should be used to improve the readability of the format."
+        assert!(is_field_character('\r'));
+        assert!(is_field_character('\n'));
+
+        // A note spanning lines is legal and must not be refused. It
+        // does not survive verbatim — the parser trims and the model
+        // holds one representation — so the assertion is that the
+        // writer does not reject it, which is what this test is for.
+        let mut file = base();
+        file.notes.push("first\r\nsecond".to_owned());
+        write(&file, WriterStyle::Canonical).expect("CR and LF are field characters");
     }
 }
 

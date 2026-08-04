@@ -72,6 +72,10 @@ pub const UNKNOWN_FIELD: DiagnosticCode = DiagnosticCode::new(3040);
 pub const FIELD_DISCARDED: DiagnosticCode = DiagnosticCode::new(3041);
 /// The file ends at ETX with no transmission checksum.
 pub const MISSING_TRANSMISSION_CHECKSUM: DiagnosticCode = DiagnosticCode::new(3042);
+/// A character outside JEDEC 3A's `<field character>` class appeared
+/// inside a field. The writer cannot encode it, so the parser reports it
+/// where it can still be pointed at.
+pub const INVALID_FIELD_CHARACTER: DiagnosticCode = DiagnosticCode::new(3043);
 
 /// Every code owned by this crate, for the uniqueness and range tests.
 pub const ALL: &[DiagnosticCode] = &[
@@ -99,6 +103,7 @@ pub const ALL: &[DiagnosticCode] = &[
     UNKNOWN_FIELD,
     FIELD_DISCARDED,
     MISSING_TRANSMISSION_CHECKSUM,
+    INVALID_FIELD_CHARACTER,
 ];
 
 #[cfg(test)]

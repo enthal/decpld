@@ -26,9 +26,22 @@ const ETX: u8 = 0x03;
 /// a rewriter must not lose anything; a converter may not care.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ParserMode {
-    /// Every field must be one JEDEC 3A defines, and the transmission
-    /// checksum must be present. For asking "is this file actually
-    /// conformant?", which is a different question from "can I read it?".
+    /// The file must be conformant, and the transmission checksum must
+    /// be present. For asking "is this file actually conformant?", which
+    /// is a different question from "can I read it?".
+    ///
+    /// Conformance is a three-way distinction, not a two-way one:
+    ///
+    /// - identifiers JEDEC 3A **defines** are accepted, whether or not
+    ///   deCPLD models them;
+    /// - identifiers it **reserves** are accepted silently, because the
+    ///   standard tells receiving equipment to ignore them;
+    /// - anything else — which, since those two sets partition A-Z, means
+    ///   a field not starting with an upper-case letter — is rejected.
+    ///
+    /// So strict mode rejects less than "only what deCPLD understands"
+    /// would, and that is deliberate: it answers a question about the
+    /// file, not about this implementation.
     Strict,
 
     /// Accept what real tools emit. Fields deCPLD does not model are
@@ -137,6 +150,37 @@ pub fn parse_with_mode(
 
         let raw = &body[cursor..star];
         let range = TextRange::new(body_start + cursor as u32, body_start + star as u32 + 1);
+
+        // Report anything outside `<field character>` here, where the
+        // offset is still known. The writer refuses such content, but by
+        // then it is a `String` with no position, so the only symptom was
+        // a `canonicalize` failure naming a category and not a place.
+        // The two checks answer different questions — "is this file
+        // conformant?" and "can I write it back?" — and share one
+        // predicate so they cannot disagree about which files are which.
+        for (offset, ch) in raw.char_indices() {
+            if crate::is_field_character(ch) {
+                continue;
+            }
+            let at_char = TextRange::new(
+                body_start + (cursor + offset) as u32,
+                body_start + (cursor + offset + ch.len_utf8()) as u32,
+            );
+            let message = format!("U+{:04X} is not a JEDEC 3A field character", ch as u32);
+            let diagnostic = if mode == ParserMode::Strict {
+                Diagnostic::error(codes::INVALID_FIELD_CHARACTER, message)
+            } else {
+                Diagnostic::warning(codes::INVALID_FIELD_CHARACTER, message)
+            };
+            diagnostics.push(
+                diagnostic
+                    .with_label(Label::primary(at(at_char), "cannot appear inside a field"))
+                    .with_note(
+                        "JEDEC 3A permits 0x20-0x29, 0x2B-0x7E, carriage return and line feed",
+                    )
+                    .with_note("deCPLD cannot write this file back out unchanged"),
+            );
+        }
 
         if design_specification.is_none() {
             // The header is the first field and has no identifier
@@ -334,7 +378,19 @@ pub fn parse_with_mode(
                     );
                     continue;
                 }
-                let _ = apply_fuse_list(field, &mut fuses, &mut diagnostics, file);
+                if apply_fuse_list(field, &mut fuses, &mut diagnostics, file).is_err() {
+                    // Nothing further to do — a rejected field has
+                    // already pushed its own diagnostics, and `parse`
+                    // returns `Err` if any of them is an error. Written
+                    // out rather than `let _ =` so the contract stays
+                    // visible, and asserted so a future diagnostic
+                    // downgraded to a warning cannot silently produce a
+                    // half-read fuse vector.
+                    debug_assert!(
+                        diagnostics.has_errors(),
+                        "a rejected fuse list must have reported why"
+                    );
+                }
             }
             "C" => match parse_hex16(field.body.trim()) {
                 Some(value) => fuse_checksum = Some(value),
@@ -427,7 +483,12 @@ pub fn parse_with_mode(
                     ParserMode::Compatible => diagnostics.push(
                         Diagnostic::warning(
                             codes::FIELD_DISCARDED,
-                            format!("`{other}` field discarded: deCPLD does not model it"),
+                            if other.is_empty() {
+                                "field with no identifier discarded: deCPLD does not model it"
+                                    .to_owned()
+                            } else {
+                                format!("`{other}` field discarded: deCPLD does not model it")
+                            },
                         )
                         .with_label(Label::primary(at(field.span), "dropped"))
                         .with_note("parse in preserve-unknown mode to retain it"),
@@ -604,31 +665,20 @@ fn apply_fuse_list(
             states_offset + offset as u32,
             states_offset + (offset + ch.len_utf8()) as u32,
         );
-        let state = match ch {
-            '0' => false,
-            '1' => true,
-            other => {
-                // Reported and skipped rather than abandoning the field.
-                // The module promises one run reports as much as
-                // possible; stopping here made a file with three bad
-                // characters take three runs to fix.
-                diagnostics.push(
-                    Diagnostic::error(
-                        codes::INVALID_FUSE_STATE,
-                        format!("fuse state must be 0 or 1, found `{other}`"),
-                    )
-                    .with_label(Label::primary(Span::new(file, at_char), "not a fuse state")),
-                );
-                sound = false;
-                fuse += 1;
-                continue;
-            }
-        };
-        if fuse >= fuses.len() {
-            // Unlike a bad character, this does not recover: every state
-            // after it is out of range too, so continuing would emit one
-            // diagnostic per remaining character, all saying the same
-            // thing.
+        // Range FIRST, before the character is interpreted at all.
+        //
+        // Order is load-bearing, not stylistic. Checking it second meant
+        // the bad-character branch advanced `fuse` with nothing bounding
+        // it — and `parse_number` puts no ceiling on an L field's fuse
+        // number, only `QF` is capped — so `L4294967295 X*` overflowed:
+        // a panic in debug, a silent wrap in release. Checking first
+        // makes `fuse` unable to exceed the device on any path, so the
+        // increments below cannot overflow.
+        //
+        // Unlike a bad character this does not recover: every state
+        // after it is out of range too, so continuing would emit one
+        // diagnostic per remaining character, all saying the same thing.
+        if !fuses.contains(fuse) {
             diagnostics.push(
                 Diagnostic::error(
                     codes::FUSE_OUT_OF_RANGE,
@@ -642,7 +692,25 @@ fn apply_fuse_list(
             );
             return Err(());
         }
-        pending.push((fuse, state));
+
+        match ch {
+            '0' => pending.push((fuse, false)),
+            '1' => pending.push((fuse, true)),
+            other => {
+                // Reported and skipped rather than abandoning the field.
+                // The module promises one run reports as much as
+                // possible; stopping here made a file with three bad
+                // characters take three runs to fix.
+                diagnostics.push(
+                    Diagnostic::error(
+                        codes::INVALID_FUSE_STATE,
+                        format!("fuse state must be 0 or 1, found `{other}`"),
+                    )
+                    .with_label(Label::primary(Span::new(file, at_char), "not a fuse state")),
+                );
+                sound = false;
+            }
+        }
         fuse += 1;
     }
 
@@ -1596,5 +1664,122 @@ mod review_findings {
         );
         // A real device is nowhere near the ceiling.
         assert!(parse("\x02h*QF5892*F0*\x030000", FILE).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod second_review_findings {
+    use super::*;
+    use decpld_diagnostics::FileId;
+
+    const FILE: FileId = FileId(0);
+
+    #[test]
+    fn a_huge_fuse_number_with_a_bad_state_does_not_overflow() {
+        // Found by review, and introduced by the atomicity change: the
+        // bad-character branch incremented `fuse` unconditionally, where
+        // previously it returned. `parse_number` caps nothing — only QF
+        // is bounded — so an L field naming u32::MAX panicked in debug
+        // and wrapped silently in release.
+        //
+        // CLAUDE.md's fuzz rule: malformed input must never panic.
+        let text = "\x02h*QF8*F0*L4294967295 X*\x030000";
+        let bundle = parse(text, FILE).expect_err("out of range");
+        assert!(bundle.iter().any(|d| d.code == codes::FUSE_OUT_OF_RANGE), "{bundle:?}");
+    }
+
+    #[test]
+    fn the_fuse_number_ceiling_is_the_device_not_the_integer_type() {
+        // Neighbouring values, so an off-by-one in the guard shows up.
+        for number in [u32::MAX, u32::MAX - 1, 9, 8] {
+            let text = format!("\x02h*QF8*F0*L{number} 1*\x030000");
+            assert!(parse(&text, FILE).is_err(), "fuse {number} is beyond an 8-fuse device");
+        }
+        assert!(parse("\x02h*QF8*F0*L7 1*\x030000", FILE).is_ok(), "fuse 7 is the last one");
+    }
+
+    #[test]
+    fn a_character_the_writer_cannot_encode_is_reported_where_it_is() {
+        // Found by review: `parse` accepted a tab in a note and `write`
+        // refused it, so the only way to learn was a failed
+        // `canonicalize` naming a category ("a note") and no position.
+        //
+        // The parser knows the offset, so it says so. Reported here as
+        // well as refused there, because the two answer different
+        // questions: "is this file conformant?" and "can I write this
+        // back?".
+        let text = "\x02h*QF8*F0*L0 11110000*N ta\tb*\x030000";
+
+        let parsed = parse(text, FILE).expect("a tab is recoverable in the lenient default");
+        let found: Vec<_> = parsed
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == codes::INVALID_FIELD_CHARACTER)
+            .collect();
+        assert_eq!(found.len(), 1, "{:?}", parsed.diagnostics);
+        assert!(found[0].message.contains("U+0009"), "{}", found[0].message);
+        // And it points at the tab rather than at the field.
+        let span = found[0].labels.first().expect("a label").span;
+        assert_eq!(&text[span.range.start as usize..span.range.end as usize], "\t");
+
+        // Non-conformant, so strict mode refuses it.
+        assert!(parse_with_mode(text, FILE, ParserMode::Strict).is_err());
+    }
+
+    #[test]
+    fn the_framing_characters_are_not_reported_as_field_characters() {
+        // STX and ETX are framing, not field content, and CR/LF are in
+        // the class. A file full of all four must stay silent, or every
+        // real JEDEC file would warn.
+        let text = "\x02h*\r\nQF8*\r\nF0*\r\nL0 11110000*\r\n\x030000";
+        let parsed = parse(text, FILE).expect("parses");
+        assert!(
+            !parsed.diagnostics.iter().any(|d| d.code == codes::INVALID_FIELD_CHARACTER),
+            "{:?}",
+            parsed.diagnostics
+        );
+    }
+
+    #[test]
+    fn a_rejected_fuse_list_writes_nothing_into_the_vector() {
+        // The atomicity claim itself, which the previous tests asserted
+        // only indirectly via diagnostics — they passed against the
+        // pre-change tree, so #21's headline was untested.
+        let field = RawField {
+            identifier: "L",
+            body: "0 111X0000",
+            body_offset: 0,
+            span: TextRange::new(0, 10),
+        };
+        let mut fuses = FuseVector::new(8, false);
+        let mut diagnostics = DiagnosticBundle::new();
+
+        let outcome = apply_fuse_list(&field, &mut fuses, &mut diagnostics, FILE);
+
+        assert!(outcome.is_err(), "a field with a bad state must be rejected");
+        for fuse in 0..8 {
+            assert_eq!(
+                fuses.get(fuse),
+                Some(false),
+                "fuse {fuse} was written despite the field being rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn an_accepted_fuse_list_writes_all_of_it() {
+        // The other half: atomicity must not mean "never commits".
+        let field = RawField {
+            identifier: "L",
+            body: "0 1011",
+            body_offset: 0,
+            span: TextRange::new(0, 6),
+        };
+        let mut fuses = FuseVector::new(8, false);
+        let mut diagnostics = DiagnosticBundle::new();
+
+        assert!(apply_fuse_list(&field, &mut fuses, &mut diagnostics, FILE).is_ok());
+        let states: Vec<bool> = fuses.iter().collect();
+        assert_eq!(states, [true, false, true, true, false, false, false, false]);
     }
 }
