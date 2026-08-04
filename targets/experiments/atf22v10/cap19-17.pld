@@ -1,0 +1,41 @@
+Name     cap19-17;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* EXPECT refusal
+
+   Seventeen independent product terms on pin 19, the widest block,
+   credited with sixteen data rows. `cap19-16` is the same design one
+   term smaller and compiles.
+
+   Pin 19 is measured as well as pin 23 because the capacities are not
+   uniform: the blocks widen toward the middle of the array, so a
+   boundary confirmed at eight says nothing about one at sixteen.
+*/
+
+PIN 1 = i0;
+PIN 2 = i1;
+PIN 3 = i2;
+PIN 4 = i3;
+PIN 5 = i4;
+PIN 6 = i5;
+PIN 7 = i6;
+PIN 8 = i7;
+PIN 9 = i8;
+PIN 10 = i9;
+PIN 11 = i10;
+PIN 13 = i11;
+PIN 14 = i12;
+PIN 15 = i13;
+PIN 16 = i14;
+PIN 17 = i15;
+PIN 18 = i16;
+PIN 19 = o0;
+
+o0 = i0 # i1 # i2 # i3 # i4 # i5 # i6 # i7 # i8 # i9 # i10 # i11 # i12 # i13 # i14 # i15 # i16;

@@ -1,0 +1,23 @@
+Name     cap14-8;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* The other end of the block map. Pin 14 and pin 23 are both credited with eight data terms; the blocks between them widen toward the middle, so confirming one end says nothing about the other. */
+
+PIN 1 = i0;
+PIN 2 = i1;
+PIN 3 = i2;
+PIN 4 = i3;
+PIN 5 = i4;
+PIN 6 = i5;
+PIN 7 = i6;
+PIN 8 = i7;
+PIN 14 = o0;
+
+o0 = i0 # i1 # i2 # i3 # i4 # i5 # i6 # i7;
