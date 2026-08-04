@@ -186,3 +186,31 @@ fn the_row_after_a_block_belongs_to_the_next_macrocell_not_to_no_one() {
     let block = G.row_block(G.macrocell_of_pin(PinNumber(23)).expect("an I/O pin")).expect("block");
     assert_eq!(G.row_block(next).expect("a block").output_enable_row, block.data_rows.end);
 }
+
+#[test]
+fn the_measured_capacity_is_capacity_in_the_true_cover() {
+    // The qualification that keeps `data_term_capacity` from being
+    // misread. Every driven macrocell in these designs reads S0 = 1,
+    // active high — `cap23-8` sets 5808/5809, `cap14-8` sets 5826/5827
+    // — so WinCUPL implemented each sum directly.
+    //
+    // It could have inverted. `!(i0 # ... # i8)` is
+    // `!i0 & !i1 & ... & !i8`, ONE product term, so a nine-input OR
+    // fits an eight-term macrocell as an active-low output. CUPL does
+    // not search for that: `o0 = ...` fixes the polarity.
+    //
+    // So eight is a bound on product TERMS, not on logic, and a fitter
+    // selecting between true and complement covers (SPEC.md §3.9) will
+    // fit designs the oracle refuses. Asserting the polarity here is
+    // what stops the capacity tests above from being read as the
+    // stronger claim.
+    let design = sum_of_literals(23, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let fuses = encode_design(&design, Footprint::Gal).expect("eight terms fit");
+    assert_eq!(fuses.get(FuseId(5808)), Some(true), "pin 23 active high, as the oracle wrote it");
+    assert_eq!(fuses.get(FuseId(5809)), Some(true), "and combinational");
+
+    let design = sum_of_literals(14, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let fuses = encode_design(&design, Footprint::Gal).expect("eight terms fit");
+    assert_eq!(fuses.get(FuseId(5826)), Some(true), "pin 14's pair is the LAST, not the first");
+    assert_eq!(fuses.get(FuseId(5827)), Some(true));
+}

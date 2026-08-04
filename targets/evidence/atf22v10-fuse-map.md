@@ -141,6 +141,12 @@ The intact links land at one literal per row, ascending: `cap23-8` puts pins 1�
 
 **The fit boundary.** Three pairs, each differing by one term. Eight fits on pin 23 and nine does not; sixteen fits on pin 19 and seventeen does not; eight fits on pin 14 and nine does not. Both eight-term ends are measured because the block map runs opposite to the pin numbering and widens toward the middle, so a boundary confirmed at one end says nothing about the other — the shape this document has already been wrong in once.
 
+**This is capacity in the true cover, and the distinction is load-bearing.** Every driven macrocell in these designs reads S0 = 1, active high: `cap23-8` sets 5808 and 5809, `cap19-16` sets 5816 and 5817, `cap14-8` sets 5826 and 5827. So WinCUPL implemented each sum directly rather than inverting it — and it *could* have inverted. `!(i0 # … # i8)` is `!i0 & !i1 & … & !i8`, a single product term that fits in one row, so a nine-input OR is implementable on an eight-term macrocell by an active-low output. CUPL does not search for that: `o0 = …` fixes the polarity, and `!o0 = …` is a different design the user has to write.
+
+The number to carry forward is therefore **eight product terms**, not "eight terms of logic". A fitter that selects between true and complement covers (SPEC.md §3.9) will fit designs WinCUPL turns away, and reading these refusals as a bound on *logic* would make that look like a bug.
+
+**A fourfold confirmation of the input-only architecture state, arriving sideways.** `cap19-16` borrows pins 14–17 as inputs, and their architecture pairs come back S0 clear, S1 set — 5821, 5823, 5825 and 5827 blown with their S0 partners intact. That is exactly what `ioin14` … `ioin23` recorded for a macrocell used only as an input, reproduced by four cells at once in a design written to measure something else entirely.
+
 What the refusal establishes is that the *compiler* will not place a ninth term, which is evidence about the part rather than proof: WinCUPL is one witness (see [Evidence level](#evidence-level)). It is, though, the strongest available statement short of hardware, and it agrees with two documents that were previously agreeing only with each other.
 
 Note also what row 10 is: pin 22's output-enable row, not spare. A ninth term on pin 23 would have to take another output's enable, which is why this is a capacity boundary and not an off-by-one.
