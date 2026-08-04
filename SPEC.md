@@ -1858,7 +1858,7 @@ Splitting a field into identifier and body is a separate question from classifyi
 
 An unmodelled field must also survive its own notation. The writer renders each one and splits it back; if it would not read as the field it came from — an empty identifier followed by a body starting with a letter has no JEDEC spelling, because the body becomes the identifier — it is refused, naming what was asked for and what it would have become. Asking the question by round-tripping rather than by a rule about safe shapes means the check cannot drift from the splitter it has to agree with. Without it these cases still failed safely, via the whole-file verification, but reported an internal error for a caller-fixable condition.
 
-Retaining a non-conformant field means `decpld jed canonicalize` can emit a file that `decpld jed validate --mode strict` then rejects. That is the intended trade and not a defect: preserving what the input actually contained beats inventing a conformant substitute for it, and the non-conformance is reported both times. A user who wants the field gone can ask for it with compatible mode.
+Retaining a non-conformant field means `decpld jed canonicalize` can emit a file that `decpld jed validate --strictness strict` then rejects. That is the intended trade and not a defect: preserving what the input actually contained beats inventing a conformant substitute for it, and the non-conformance is reported both times. A user who wants the field gone can ask for it with compatible mode.
 
 **An `L` field applies all or nothing.** States are accumulated and committed only once the whole field is known good, so no fault can leave the fuse vector half-updated. Every bad state character in a field is reported, not just the first — one run should tell the user everything wrong with the file. A fuse number past `QF` is the exception and stops the field: every state after it is out of range too, so continuing would emit one diagnostic per remaining character, all saying the same thing.
 
@@ -2248,7 +2248,7 @@ decpld oracle analyze-suite targets/fixtures/atf22v10
 
 `--style` selects the writer style. Both default to the tolerant choice: `preserve-unknown` and `canonical`.
 
-### Exit codes
+### 5.17.1 Exit codes
 
 The `jed` commands follow `diff(1)`, so they compose into scripts:
 

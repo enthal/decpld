@@ -1510,7 +1510,7 @@ mod identifier_tables {
         // identifiers."
         //
         // Real Atmel-toolchain files carry `J` and `U`, so diagnosing
-        // these made `validate --mode strict` reject conformant files.
+        // these made `validate --strictness strict` reject conformant files.
         for letter in RESERVED {
             let text = format!("\x02h*QF8*F0*L0 11110000*{letter}1*\x030000");
             let parsed = parse_with_mode(&text, FILE, ParserMode::Strict)
