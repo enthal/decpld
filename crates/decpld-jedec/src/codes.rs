@@ -32,6 +32,9 @@ pub const MISSING_FUSE_COUNT: DiagnosticCode = DiagnosticCode::new(3015);
 pub const AMBIGUOUS_FUSE_LIST: DiagnosticCode = DiagnosticCode::new(3016);
 /// `QF` declares more fuses than deCPLD will allocate for.
 pub const FUSE_COUNT_TOO_LARGE: DiagnosticCode = DiagnosticCode::new(3017);
+/// The file has no `F` field, so every fuse state must be given — and
+/// some were not. JEDEC 3A lines 376-377.
+pub const INCOMPLETE_FUSE_COVERAGE: DiagnosticCode = DiagnosticCode::new(3018);
 
 // ---- Checksums ----
 
@@ -90,6 +93,7 @@ pub const ALL: &[DiagnosticCode] = &[
     MISSING_FUSE_COUNT,
     AMBIGUOUS_FUSE_LIST,
     FUSE_COUNT_TOO_LARGE,
+    INCOMPLETE_FUSE_COVERAGE,
     INVALID_CHECKSUM_FIELD,
     FUSE_CHECKSUM_MISMATCH,
     TRANSMISSION_CHECKSUM_MISMATCH,

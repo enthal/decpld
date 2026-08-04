@@ -31,7 +31,7 @@ fn parses_a_real_galette_file() {
     let parsed = parse(COMBINATORIAL, FileId(0)).expect("galette output should parse");
 
     assert_eq!(parsed.file.fuses.len(), 2194, "QF2194");
-    assert!(!parsed.file.default_fuse, "F0");
+    assert_eq!(parsed.file.default_fuse, Some(false), "F0");
     assert_eq!(parsed.file.security, Some(false), "G0");
 
     let header = parsed.file.design_specification;

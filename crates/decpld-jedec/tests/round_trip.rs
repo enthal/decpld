@@ -61,7 +61,17 @@ fn any_jedec_file() -> impl Strategy<Value = JedecFile> {
     // Fuse counts deliberately include values that are not multiples of
     // eight, where the final partial word's padding bits decide whether
     // the checksum is right.
-    (1usize..300, any::<bool>(), any::<bool>(), proptest::option::of(any::<bool>()))
+    // `default_fuse` is an Option, and `None` — a file that carries no
+    // `F` field because it states every fuse explicitly — is a distinct
+    // state the writer handles differently in BOTH styles. Generating
+    // only `Some` would leave the round trip blind to exactly the case
+    // that was just introduced.
+    (
+        1usize..300,
+        proptest::option::of(any::<bool>()),
+        any::<bool>(),
+        proptest::option::of(any::<bool>()),
+    )
         .prop_flat_map(|(count, default, has_header, security)| {
             (
                 proptest::collection::vec(any::<bool>(), count),
@@ -72,7 +82,7 @@ fn any_jedec_file() -> impl Strategy<Value = JedecFile> {
             )
         })
         .prop_map(|(states, default_fuse, has_header, security, unknown_fields)| {
-            let mut fuses = FuseVector::new(states.len() as u32, default_fuse);
+            let mut fuses = FuseVector::new(states.len() as u32, default_fuse.unwrap_or(false));
             for (index, state) in states.iter().enumerate() {
                 fuses.set(index as u32, *state).expect("in range by construction");
             }

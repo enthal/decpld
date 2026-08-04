@@ -242,7 +242,7 @@ fn summarise(name: &str, file: &decpld_jedec::JedecFile) -> String {
     format!(
         "{name}: ok — {} fuses, default {}, checksum {:04X}",
         file.fuses.len(),
-        u8::from(file.default_fuse),
+        describe_default(file.default_fuse),
         file.computed_fuse_checksum()
     )
 }
@@ -264,7 +264,8 @@ fn render_diff(delta: &JedecDiff, before: &str, after: &str) -> String {
         );
     }
     if let Some((a, b)) = delta.default_fuse {
-        let _ = writeln!(out, "default fuse state: {} -> {}", u8::from(a), u8::from(b));
+        let _ =
+            writeln!(out, "default fuse state: {} -> {}", describe_default(a), describe_default(b));
     }
     if let Some((a, b)) = delta.security {
         let _ =
@@ -289,6 +290,19 @@ fn render_diff(delta: &JedecDiff, before: &str, after: &str) -> String {
         let _ = writeln!(out, "{} fuse(s) differ", delta.fuses.len());
     }
     out
+}
+
+/// How a file's `F` field reads in a report.
+///
+/// "absent" rather than "0", because a file with no `F` field is one
+/// where every fuse state is stated explicitly — a different claim from
+/// "unlisted fuses are 0", and the distinction #20 exists to preserve.
+fn describe_default(state: Option<bool>) -> &'static str {
+    match state {
+        None => "absent (every fuse stated)",
+        Some(false) => "0",
+        Some(true) => "1",
+    }
 }
 
 fn describe_security(state: Option<bool>) -> &'static str {
@@ -329,13 +343,34 @@ mod tests {
     fn the_summary_reports_count_default_and_checksum() {
         // `summarise` was extracted as a pure function precisely so it
         // could be tested without spawning a process, and then was not
-        // tested. The default state is printed as a digit because that
-        // is how the `F` field spells it.
+        // tested. A present default is printed as the digit the `F`
+        // field spells it with; an absent one says so in words.
         let file =
             decpld_jedec::parse("\x02h*QF16*F1*L0 0*\x030000", FileId(0)).expect("parses").file;
         let out = summarise("d.jed", &file);
         assert!(out.starts_with("d.jed: ok — 16 fuses, default 1, checksum "), "{out}");
         assert!(out.ends_with(&format!("{:04X}", file.computed_fuse_checksum())), "{out}");
+    }
+
+    #[test]
+    fn an_absent_default_fuse_state_is_not_described_as_zero() {
+        // The whole point of #20: a file with no F field says "every
+        // fuse state is stated here", which is a different claim from
+        // "unlisted fuses are 0". A report that printed `0` for both
+        // would undo the distinction at the last step.
+        let delta = JedecDiff { default_fuse: Some((None, Some(false))), ..JedecDiff::default() };
+        let out = render_diff(&delta, "a.jed", "b.jed");
+        assert!(out.contains("default fuse state: absent"), "{out}");
+        assert!(!out.contains("default fuse state: 0 ->"), "{out}");
+    }
+
+    #[test]
+    fn the_summary_says_absent_when_there_is_no_f_field() {
+        let file = decpld_jedec::parse("\x02h*QF8*L0 10110001*\x030000", FileId(0))
+            .expect("complete coverage, so no F field is needed")
+            .file;
+        let out = summarise("d.jed", &file);
+        assert!(out.contains("default absent"), "{out}");
     }
 
     #[test]

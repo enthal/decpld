@@ -66,8 +66,17 @@ pub struct JedecFile {
     /// collapsing them is recorded there as a deliberate deviation.)
     pub fuses: FuseVector,
 
-    /// The `F` field: the state every fuse starts in.
-    pub default_fuse: bool,
+    /// The `F` field: the state every fuse not named by an `L` field
+    /// takes.
+    ///
+    /// `None` means the file did not carry one — which JEDEC 3A permits
+    /// only when every fuse state is stated explicitly (line 376), and
+    /// which the parser therefore checks rather than assumes. It is not
+    /// the same as `Some(false)`: one is silence, the other is an
+    /// instruction, exactly as for [`Self::security`]. Modelling it as a
+    /// plain `bool` made "unlisted means 0" out of "every state must be
+    /// explicit", and `write` then emitted the `F0*` that said so.
+    pub default_fuse: Option<bool>,
 
     /// `N` fields, in file order.
     pub notes: Vec<String>,
