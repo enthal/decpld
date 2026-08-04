@@ -301,8 +301,14 @@ pub fn parse_with_mode(
                     ),
                     ParserMode::Strict | ParserMode::PreserveUnknown => {
                         unknown_fields.push(JedecField {
+                            // Normalised here rather than on the way
+                            // out, so the model holds one
+                            // representation. `QP 20*` and `QP20*` mean
+                            // the same thing; if the difference survived
+                            // into the model, a file would differ from
+                            // its own canonicalisation.
                             identifier: other.to_owned(),
-                            body: field.body.to_owned(),
+                            body: field.body.trim().to_owned(),
                             span: at(field.span),
                         });
                     }
@@ -310,6 +316,14 @@ pub fn parse_with_mode(
             }
         }
     }
+
+    // Value fields must precede programming and testing fields (JEDEC
+    // 3A, Value Fields). Hoisting here rather than only on the way out
+    // means the model holds one canonical order, so a file and its own
+    // canonicalisation compare equal. A stable sort keeps the relative
+    // order within each group, which matters: test vectors are a
+    // sequence, and V0002 arriving before V0001 would be a real change.
+    unknown_fields.sort_by_key(|field| !field.is_value_field());
 
     // ---- Checksums ----
 

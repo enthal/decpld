@@ -95,10 +95,14 @@ pub fn diff(before: &JedecFile, after: &JedecFile) -> JedecDiff {
     out
 }
 
-/// Render unmodelled fields for reporting. `JedecField` equality ignores
-/// spans, so this shows only what is compared.
+/// Render unmodelled fields for reporting.
+///
+/// Shows exactly what is compared — bodies are already normalised at
+/// parse time, so no trimming happens here. A renderer that tidied its
+/// output would be able to print `["QP20"] -> ["QP20"]` for a reported
+/// difference, which is worse than either answer on its own.
 fn describe(fields: &[crate::JedecField]) -> Vec<String> {
-    fields.iter().map(|f| format!("{}{}", f.identifier, f.body.trim())).collect()
+    fields.iter().map(|f| format!("{}{}", f.identifier, f.body)).collect()
 }
 
 #[cfg(test)]

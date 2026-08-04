@@ -64,11 +64,14 @@ pub fn write(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError>
     // precisely why this matters: the output is for other tools, and
     // `canonicalize` emitting non-conformant files would defeat the
     // command's whole purpose.
+    // The parser already hoists these, so for a parsed file this is a
+    // no-op. It is repeated here so the writer is correct on its own:
+    // a `JedecFile` built by hand still produces a conformant file.
     let (value_fields, other_fields): (Vec<_>, Vec<_>) =
-        file.unknown_fields.iter().partition(|f| is_value_field(&f.identifier));
+        file.unknown_fields.iter().partition(|f| f.is_value_field());
     for field in &value_fields {
         reject_asterisk("an unmodelled field", &field.body)?;
-        out.push_str(&format!("{}{}*\n", field.identifier, field.body.trim()));
+        out.push_str(&format!("{}{}*\n", field.identifier, field.body));
     }
 
     out.push_str(if file.default_fuse { "F1*\n" } else { "F0*\n" });
@@ -96,7 +99,7 @@ pub fn write(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError>
 
     for field in &other_fields {
         reject_asterisk("an unmodelled field", &field.body)?;
-        out.push_str(&format!("{}{}*\n", field.identifier, field.body.trim()));
+        out.push_str(&format!("{}{}*\n", field.identifier, field.body));
     }
 
     out.push('\u{3}');
@@ -145,12 +148,6 @@ fn write_differing_fuses(out: &mut String, file: &JedecFile) {
         }
         out.push_str("*\n");
     }
-}
-
-/// Whether an identifier names a JEDEC 3A *value* field, which must
-/// precede every programming and testing field.
-fn is_value_field(identifier: &str) -> bool {
-    matches!(identifier, "QF" | "QP" | "QV")
 }
 
 fn reject_asterisk(context: &'static str, text: &str) -> Result<(), WriteError> {
@@ -253,6 +250,26 @@ mod tests {
         let v = written.find("V0001").expect("V retained");
         let first_l = written.find("L0").expect("an L field");
         assert!(v > first_l, "test vectors follow the fuse list:\n{written}");
+    }
+
+    #[test]
+    fn an_unmodelled_field_with_a_spaced_body_round_trips() {
+        // `QP 20*` and `QP20*` mean the same thing, and the model must
+        // pick one representation at parse time. Normalising on the way
+        // *out* instead would make a file differ from its own
+        // canonicalisation — and, because the diff renderer trims for
+        // display too, report it as `["QP20"] -> ["QP20"]`: a difference
+        // with nothing visibly different, which is worse than either
+        // answer alone.
+        round_trip("\x02h*QF8*QP 20*F0*L0 11110000*\x030000", WriterStyle::Canonical);
+    }
+
+    #[test]
+    fn unmodelled_field_bodies_are_normalised_at_parse_time() {
+        let spaced = parse("\x02h*QF8*QP 20*F0*\x030000", FILE).expect("parses").file;
+        let tight = parse("\x02h*QF8*QP20*F0*\x030000", FILE).expect("parses").file;
+        assert_eq!(spaced.unknown_fields, tight.unknown_fields);
+        assert!(spaced.describes_same_device_as(&tight));
     }
 
     #[test]
