@@ -2219,6 +2219,45 @@ Report:
 - unused product terms;
 - reserved/security/signature status.
 
+`decpld-report` builds it, from a `PhysicalDesign`, a `PackageSpec`, an `AndMatrixSpec`, the device's `MacrocellSpec`s, and a `FuseMap`. It knows nothing about JEDEC syntax and nothing about any particular device, so a target it has never heard of reports the same way.
+
+```rust
+pub struct InspectReport {
+    pub device: String,
+    pub package: String,
+    pub fuse_count: u32,
+    pub macrocells: Vec<MacrocellReport>,
+    pub global_terms: Vec<GlobalTermReport>,
+    pub user_signature: Option<SignatureReport>,
+    pub security_fuse_set: bool,
+}
+
+impl InspectReport {
+    pub fn new(
+        design: &PhysicalDesign,
+        package: &PackageSpec,
+        matrix: &AndMatrixSpec,
+        specs: &[MacrocellSpec],
+        fuses: &FuseMap,
+    ) -> Result<Self, ReportError>;
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error>;
+}
+
+pub enum ReportError {
+    PackageMismatch { design: PackageId, supplied: PackageId },
+    UnknownRow { row: ProductTermId },
+    UnknownInput { input: BoolInputId },
+    UnknownMacrocell { macrocell: MacrocellId },
+}
+```
+
+**Everything is named in pins.** A `PhysicalDesign` speaks in macrocell ids, product-term rows, and `BoolInputId`s; a person holding the part has only pin numbers, so that is the translation the report exists to perform. A feedback path is named for the pin its macrocell drives — it does arrive there — with the difference recorded as a `kind` rather than spelled into the name. A literal no `LiteralSource` carries is an **error**, not a fallback to "input 9": a signal name corresponding to nothing on the part is worse than a refusal. A design whose `package` is not the one supplied is refused for the same reason, since every pin number in the report would then be confidently wrong.
+
+**A product term with no literals renders as `always`.** It is the empty AND, constantly true (§4.5), and a blank line there would show an always-enabled output as having no enable at all — the opposite of what it means. An absent output-enable term renders as `never`, which is how this device family says the pin is an input.
+
+Report structs carry plain numbers rather than the device layer's typed ids. A report is a presentation type whose JSON form is untyped, and carrying the newtypes would mean spreading `serde` across the device layer to buy nothing this layer can use.
+
 Also provide `--json`.
 
 ---
