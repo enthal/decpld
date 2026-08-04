@@ -1567,18 +1567,40 @@ The security fuse is not reachable through the ordinary write path at all. It ha
 
 ```rust
 pub struct ConfigField<T> {
-    pub id: ConfigFieldId,
-    pub name: &'static str,
-    pub bits: SmallVec<[FuseId; 4]>,
-    pub encoding: BTreeMap<T, SmallVec<[bool; 4]>>,
+    // Private: validated on construction, see the rules below.
+    id: ConfigFieldId,
+    name: &'static str,
+    bits: Vec<FuseId>,
+    patterns_by_value: BTreeMap<T, Vec<bool>>,
 }
+
+pub struct ConfigFieldId(pub u16);
 
 pub enum OutputPolarity { ActiveHigh, ActiveLow }
 pub enum MacrocellMode { Combinational, Registered, InputOnly }
 pub enum FeedbackSource { Pin, Combinational, Registered, None }
+
+pub enum ConfigFieldError {
+    NoBits { name: &'static str },
+    FuseUsedTwice { name: &'static str, fuse: FuseId },
+    PatternWidthMismatch { name: &'static str, bits: usize, pattern: usize },
+    PatternUsedTwice { name: &'static str, pattern: Vec<bool> },
+    PatternUnassigned { name: &'static str, pattern: Vec<bool> },
+    ValueNotEncodable { name: &'static str },
+    FuseOutOfRange { name: &'static str, fuse: FuseId },
+    Fuse { name: &'static str, source: FuseWriteError },
+}
 ```
 
 Only this layer knows whether a logical option is encoded by fuse zero or one.
+
+`Vec` rather than `SmallVec`, for the reason §4.2 uses `Vec<bool>` rather than `BitVec`: a field is one or two fuses on the devices in scope and every field is built once at target construction, so the saving is a handful of allocations in exchange for a dependency. Revisit if a target ever has thousands of fields.
+
+Construction also refuses one value given two patterns. Accepting it last-wins would break totality from the far side — the field validates, and then decoding cannot name a state the chip can hold — and would make the declaration order of the encoding list observable in the fuses (§0.2.5). A field may span at most `usize::BITS - 1` fuses, because the totality enumeration shifts by the width and a shift of the full word masks to one, which would silently accept a field covering a single pattern.
+
+**Construction requires the field to be total.** The bit patterns must be distinct, must all match the field's width, and **every** pattern the fuses can hold must be assigned a value. A model that left a pattern unassigned could not describe a chip somebody else programmed — which is precisely the case `jed inspect` exists for — and would discover the gap on a user's file rather than at construction. Patterns are little-endian over `bits`: index 0 is the first fuse.
+
+**A field need not encode every variant of its type.** `MacrocellMode` has three, and a device that reaches `InputOnly` by some other means — an always-false output-enable term, say — declares two. `encode` then refuses `InputOnly` rather than substituting something encodable, because a cell that quietly became a combinational output would drive a pin the design meant to leave floating. Capability is asked of `MacrocellSpec::supports`, which consults the flags; the field answers only what is storable in fuses.
 
 ## 4.4 AND matrix
 
@@ -1721,6 +1743,11 @@ pub struct MacrocellSpec {
     pub fixed_clock: Option<ClockResourceId>,
 }
 
+impl MacrocellSpec {
+    pub fn data_term_capacity(&self) -> usize;
+    pub fn supports(&self, mode: MacrocellMode) -> bool;
+}
+
 pub struct MacrocellConfig {
     pub id: MacrocellId,
     pub assigned_signal: Option<LogicalOutputId>,
@@ -1732,6 +1759,8 @@ pub struct MacrocellConfig {
     pub pad_enabled: bool,
 }
 ```
+
+`supports` consults the capability flags rather than `mode_field`, because the two can legitimately disagree: a mode a device reaches without a fuse is supported and not encodable. A fitter asks `supports`; an encoder asks the field, and gets an error if it asks for something unstorable.
 
 ## 4.6 Packages
 
@@ -1810,6 +1839,7 @@ Encode and verify:
 - common global clock;
 - macrocell feedback;
 - reset/preset resources if and as represented in the verified map;
+- `MacrocellMode::InputOnly` is **supported but not encodable**: the architecture region is exactly two fuses per macrocell and both are spoken for by polarity and mode, so an undriven cell is indistinguishable in those bits from a combinational active-low output. What differs is the output-enable term, left permanently false. That the term is the *mechanism* is an inference pending §7.4's output-enable experiments, so `MacrocellSpec::supports` reports the capability while the mode field refuses to encode it, and a fitter must reach for the output-enable term rather than the field;
 - matrix, architecture, signature, security, and reserved fuse regions.
 
 Builder:
