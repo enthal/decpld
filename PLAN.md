@@ -16,7 +16,7 @@ Crates are created by the milestone that needs them; SPEC.md §3 records the ful
 - [x] CI (fmt, clippy, test, markdown) on Linux, pre-commit hook, PR template — [#4](https://github.com/enthal/decpld/pull/4), [#6](https://github.com/enthal/decpld/pull/6)
 - [x] Branch protection: PRs only, linear history, required status checks, signed commits — [#4](https://github.com/enthal/decpld/pull/4)
 - [x] CLAUDE.md, README.md, this plan, and the `merge-review` skill — [#5](https://github.com/enthal/decpld/pull/5)
-- [ ] `targets/evidence/`: datasheet revisions and hashes recorded from SPEC.md §5.33
+- [x] `targets/evidence/`: primary references recorded with hashes, plus a verifier — [#8](https://github.com/enthal/decpld/pull/8)
 
 ## M0 — JEDEC foundation
 
