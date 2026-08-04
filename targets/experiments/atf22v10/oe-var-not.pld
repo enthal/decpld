@@ -1,0 +1,23 @@
+Name     oe-var-not;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* SPEC.md 7.4, output enable: `Y.OE = !E`.
+
+   The complement of `oe-var`, and the pair is what distinguishes the
+   enable row's TRUE column from its COMPLEMENT column. One design alone
+   cannot: a single intact link is consistent with either sense until a
+   second design moves it. */
+
+PIN 2  = i0;
+PIN 3  = e;
+PIN 23 = o0;
+
+o0    = i0;
+o0.oe = !e;

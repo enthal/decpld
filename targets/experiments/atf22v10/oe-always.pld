@@ -1,0 +1,23 @@
+Name     oe-always;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* SPEC.md 7.4, output enable: always enabled, stated explicitly.
+
+   `in2` reaches the same state by saying nothing about the enable, so
+   comparing the two answers a separate question: does an explicit
+   `o0.oe = 'b'1` produce the same fuses as CUPL's own default, or does
+   the compiler treat the two differently? A difference would mean the
+   default is not what it appears to be. */
+
+PIN 2  = i0;
+PIN 23 = o0;
+
+o0    = i0;
+o0.oe = 'b'1;
