@@ -132,7 +132,7 @@ The device layer is a typed Rust specification with an `ArchitectureKind` seam, 
 
 | Milestone | What it delivers |
 | --- | --- |
-| M0 | JEDEC foundation — parse, validate, canonicalize, checksum |
+| M0 | JEDEC foundation — parse, validate, canonicalize, checksum ✅ |
 | M1 | ATF22V10 decoder/encoder with round-trip invariants |
 | M2 | Minimal combinational language — working hardware |
 | M3 | Registered logic — counters and shift registers on real parts |
@@ -143,13 +143,40 @@ The device layer is a typed Rust specification with an `ArchitectureKind` seam, 
 
 ## Getting started
 
-There is nothing useful to run yet. To build the tree as it stands:
+The compiler is not built yet, but the JEDEC layer is, and it is useful on its own — it will read, check, canonicalise, and compare fuse maps from *any* tool, including WinCUPL's.
 
 ```sh
 git clone https://github.com/enthal/decpld
 cd decpld
-cargo build --workspace
+cargo build --release
 ```
+
+```console
+$ decpld jed validate design.jed
+design.jed: ok — 2194 fuses, default 0, checksum 403E
+
+$ decpld jed validate broken.jed
+broken.jed:4:7: error[E3012]: fuse state must be 0 or 1, found `2`
+  L0 1012*
+        ^
+```
+
+`decpld jed canonicalize` rewrites a file in a stable, diffable form and **repairs its checksums** — a file carrying `C0000` ("not computed") comes out with a real one.
+
+`decpld jed diff` compares two files by *fuse vector*, not by text, so reformatting is not a difference:
+
+```console
+$ decpld jed diff a.jed b.jed          # same fuses, different layout
+a.jed and b.jed describe the same device
+
+$ decpld jed diff a.jed c.jed
+--- a.jed
++++ c.jed
+fuse 3: 0 -> 1
+1 fuse(s) differ
+```
+
+That distinction is what makes the command worth having over `diff(1)`, and it is the foundation the device work builds on: reverse-engineering a fuse map means changing one thing and seeing which *fuses* moved.
 
 Rust **1.95+** is required and pinned in [rust-toolchain.toml](rust-toolchain.toml); `rustup` installs it automatically on the first `cargo` invocation.
 

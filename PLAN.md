@@ -28,7 +28,7 @@ Parse, validate, canonicalize, and rewrite known JEDEC files with correct checks
 - [x] Writer styles: canonical and compact — [#13](https://github.com/enthal/decpld/pull/13). WinCUPL-comparable deferred to M1: matching it requires real WinCUPL output to match against
 - [x] Line-ending and whitespace variants; unknown fields preserved and reported — [#12](https://github.com/enthal/decpld/pull/12)
 - [x] Property test: round-trip over random valid fuse vectors — [#13](https://github.com/enthal/decpld/pull/13)
-- [ ] `decpld jed validate` / `canonicalize` / `diff` wired into the CLI
+- [x] `decpld jed validate` / `canonicalize` / `diff` wired into the CLI — [#14](https://github.com/enthal/decpld/pull/14)
 - [x] `decpld-diagnostics`: `Span`, `FileId`, `LineIndex`, `Diagnostic`, severity, labels, notes, fixes, and stable diagnostic codes — [#9](https://github.com/enthal/decpld/pull/9)
 
 ## M1 — ATF22V10 decoder and encoder

@@ -16,6 +16,9 @@ name = "decpld"
 path = "src/main.rs"
 
 [dependencies]
+decpld-diagnostics.workspace = true
+decpld-jedec.workspace = true
+clap.workspace = true
 
 [lints]
 workspace = true

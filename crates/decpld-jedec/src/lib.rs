@@ -10,6 +10,7 @@
 //! `targets/evidence/references.toml` as `jedec-3a`.
 
 mod checksum;
+mod diff;
 mod fuses;
 mod model;
 mod parse;
@@ -18,6 +19,7 @@ mod write;
 pub mod codes;
 
 pub use checksum::{DUMMY_TRANSMISSION_CHECKSUM, transmission_checksum};
+pub use diff::{FuseDelta, JedecDiff, diff};
 pub use fuses::{FuseError, FuseVector};
 pub use model::{JedecField, JedecFile};
 pub use parse::{Parsed, ParserMode, parse, parse_with_mode};
