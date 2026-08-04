@@ -1,0 +1,15 @@
+[package]
+name = "decpld-diagnostics"
+description = "Source spans, line indexing, and structured diagnostics shared by the deCPLD compiler, CLI, and language server."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true
