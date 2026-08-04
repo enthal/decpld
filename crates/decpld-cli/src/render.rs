@@ -23,14 +23,27 @@ pub fn diagnostic(diagnostic: &Diagnostic, path: &str, source: &str, index: &Lin
             // source beats describing it: an offset means nothing to a
             // human staring at a 70-line fuse map.
             if let Some(text) = index.line_text(source, at.line) {
-                let _ = writeln!(out, "  {text}");
-                let width = span.range.len().max(1) as usize;
-                let _ = writeln!(
-                    out,
-                    "  {}{}",
-                    " ".repeat(at.column.saturating_sub(1) as usize),
-                    "^".repeat(width)
-                );
+                // Control characters are data in a JEDEC file — STX, ETX
+                // and embedded CRs all appear in line 1 — and echoing
+                // them raw moves the terminal cursor, so the caret ends
+                // up pointing at nothing.
+                let visible: String =
+                    text.chars().map(|c| if c.is_control() { '\u{fffd}' } else { c }).collect();
+                let _ = writeln!(out, "  {visible}");
+
+                let leading = at.column.saturating_sub(1) as usize;
+                // Width in CHARACTERS, not bytes: `span.range.len()` is a
+                // byte count, and pairing it with a character column drew
+                // two carets under a one-character `é`. Clamped to what
+                // remains of the line so a span running past the end — an
+                // unterminated field reaches the next line — cannot spray
+                // carets into empty space.
+                let width = source
+                    .get(span.range.start as usize..span.range.end as usize)
+                    .map_or(1, |s| s.chars().count())
+                    .max(1)
+                    .min(visible.chars().count().saturating_sub(leading).max(1));
+                let _ = writeln!(out, "  {}{}", " ".repeat(leading), "^".repeat(width));
             }
         }
         None => {
@@ -39,6 +52,11 @@ pub fn diagnostic(diagnostic: &Diagnostic, path: &str, source: &str, index: &Lin
     }
 
     for label in &diagnostic.labels {
+        // The primary label's location is already the headline and its
+        // caret; repeating it underneath is noise.
+        if label.is_primary {
+            continue;
+        }
         if !label.message.is_empty() {
             let at = index.line_col(label.span.range.start);
             let _ = writeln!(out, "  {}:{}: {}", at.line, at.column, label.message);

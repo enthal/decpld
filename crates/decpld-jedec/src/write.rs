@@ -37,6 +37,33 @@ pub enum WriteError {
     /// file that silently reads back as something else.
     #[error("{context} contains an asterisk, which would terminate the field early: {text:?}")]
     AsteriskInText { context: &'static str, text: String },
+
+    /// The written file did not read back as the file it came from.
+    ///
+    /// Always a deCPLD bug rather than a user error, and reported rather
+    /// than returned as output because a JEDEC file that quietly means
+    /// something else is the worst artifact this crate can produce.
+    #[error(
+        "internal error: the written file does not read back as the same device. \
+         This is a deCPLD bug; please report it."
+    )]
+    RoundTripFailed,
+}
+
+/// Join an unmodelled field's identifier to its body.
+///
+/// A space is inserted when the body begins with a letter, because the
+/// parser recovers an unknown identifier by taking the leading
+/// alphabetic run: `Z` + `custom` written as `Zcustom*` reads back as
+/// identifier `Zcustom` with an empty body. That is silent corruption in
+/// the mode whose entire purpose is losing nothing. `QP` + `20` still
+/// writes as `QP20*`, the form the standard prints.
+fn join_field(identifier: &str, body: &str) -> String {
+    if body.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        format!("{identifier} {body}*\n")
+    } else {
+        format!("{identifier}{body}*\n")
+    }
 }
 
 /// Serialise `file` in the given style.
@@ -45,6 +72,26 @@ pub enum WriteError {
 /// recomputed fuse checksum, so writing a file is also how it gets
 /// repaired.
 pub fn write(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError> {
+    let text = render(file, style)?;
+
+    // Encode, then decode, then compare — CLAUDE.md's central rule,
+    // applied to the writer itself rather than only to a test property.
+    //
+    // A test can only check the cases someone thought to generate, and
+    // the identifier-joining bug above slipped through precisely because
+    // the property never generated a body starting with a letter. This
+    // check does not depend on anyone having imagined the failure. It
+    // costs one extra parse of a file measured in kilobytes, and it is
+    // what stands between `canonicalize` and quietly rewriting a user's
+    // fuse map into a different one.
+    match crate::parse(&text, decpld_diagnostics::FileId(0)) {
+        Ok(parsed) if parsed.file.describes_same_device_as(file) => Ok(text),
+        _ => Err(WriteError::RoundTripFailed),
+    }
+}
+
+/// Serialise without verifying. Use [`write`].
+fn render(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError> {
     let mut out = String::from('\u{2}');
 
     // The design specification is the first field and has no identifier.
@@ -71,7 +118,7 @@ pub fn write(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError>
         file.unknown_fields.iter().partition(|f| f.is_value_field());
     for field in &value_fields {
         reject_asterisk("an unmodelled field", &field.body)?;
-        out.push_str(&format!("{}{}*\n", field.identifier, field.body));
+        out.push_str(&join_field(&field.identifier, &field.body));
     }
 
     out.push_str(if file.default_fuse { "F1*\n" } else { "F0*\n" });
@@ -99,7 +146,7 @@ pub fn write(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError>
 
     for field in &other_fields {
         reject_asterisk("an unmodelled field", &field.body)?;
-        out.push_str(&format!("{}{}*\n", field.identifier, field.body));
+        out.push_str(&join_field(&field.identifier, &field.body));
     }
 
     out.push('\u{3}');
@@ -411,5 +458,49 @@ mod tests {
 
         file.security = Some(true);
         assert!(write(&file, WriterStyle::Canonical).unwrap().contains("G1*"));
+    }
+}
+
+#[cfg(test)]
+mod review_findings {
+    use super::*;
+    use crate::parse;
+    use decpld_diagnostics::FileId;
+
+    const FILE: FileId = FileId(0);
+
+    #[test]
+    fn an_unmodelled_field_whose_body_starts_with_a_letter_round_trips() {
+        // Found by review, using this exact input. `Z` + `custom` was
+        // written `Zcustom*` and read back as identifier `Zcustom` with
+        // an empty body — silent corruption in the DEFAULT mode, whose
+        // stated purpose is losing nothing.
+        let text = "\x02h*QF8*F0*L0 11110000*Z custom*\x030000";
+        let original = parse(text, FILE).expect("parses").file;
+        let written = write(&original, WriterStyle::Canonical).expect("writes");
+        let reparsed = parse(&written, FILE).expect("reparses").file;
+
+        assert!(original.describes_same_device_as(&reparsed), "written:\n{written}");
+        assert_eq!(reparsed.unknown_fields[0].identifier, "Z");
+        assert_eq!(reparsed.unknown_fields[0].body, "custom");
+    }
+
+    #[test]
+    fn a_value_field_still_writes_without_a_separator() {
+        // The fix must not disturb the form the standard prints.
+        let file = parse("\x02h*QF8*QP20*F0*\x030000", FILE).expect("parses").file;
+        assert!(write(&file, WriterStyle::Canonical).unwrap().contains("QP20*"));
+    }
+
+    #[test]
+    fn write_refuses_rather_than_emitting_a_file_that_reads_back_differently() {
+        // The structural guard: a note carrying whitespace the parser
+        // would normalise away cannot be encoded faithfully, so `write`
+        // now refuses instead of silently changing it. This check does
+        // not depend on anyone having imagined the failure mode, which
+        // is exactly why it is worth its cost.
+        let mut file = parse("\x02h*QF8*F0*\x030000", FILE).expect("parses").file;
+        file.notes.push("  padded  ".to_owned());
+        assert_eq!(write(&file, WriterStyle::Canonical), Err(WriteError::RoundTripFailed));
     }
 }

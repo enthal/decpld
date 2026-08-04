@@ -157,14 +157,13 @@ fn validate(path: &Path, mode: ParserMode) -> Result<u8, Failure> {
 
     match parse_with_mode(&source, FileId(0), mode) {
         Ok(parsed) => {
-            print!("{}", render::bundle(&parsed.diagnostics, &name, &source));
+            // Diagnostics go to stderr whether or not the parse
+            // succeeded. Which stream carries a diagnostic must depend on
+            // it being a diagnostic, not on the luck of the parse — a
+            // warning on stdout corrupts `decpld jed validate f | ...`.
+            eprint!("{}", render::bundle(&parsed.diagnostics, &name, &source));
             let file = parsed.file;
-            println!(
-                "{name}: ok — {} fuses, default {}, checksum {:04X}",
-                file.fuses.len(),
-                u8::from(file.default_fuse),
-                file.computed_fuse_checksum()
-            );
+            println!("{}", summarise(&name, &file));
             Ok(OK)
         }
         Err(bundle) => {
@@ -185,6 +184,14 @@ fn canonicalize(path: &Path, output: Option<&Path>, style: WriterStyle) -> Resul
             eprint!("{}", render::bundle(&bundle, &name, &source));
             Failure::trouble(format!("{name}: not a valid JEDEC file"))
         })?;
+
+    // Every command reports what the parse found. Three commands over
+    // one file disagreeing about its diagnostics is the same class of
+    // defect as `decpld check` disagreeing with an editor squiggle
+    // (CLAUDE.md → the one architectural rule) — and `canonicalize` is
+    // exactly where "I did not recognise this field but rewrote it
+    // anyway" needs saying.
+    eprint!("{}", render::bundle(&parsed.diagnostics, &name, &source));
 
     let text = write(&parsed.file, style).map_err(|e| Failure::trouble(format!("{name}: {e}")))?;
 
@@ -207,8 +214,11 @@ fn diff(before: &Path, after: &Path) -> Result<u8, Failure> {
         })
     };
 
-    let left = parse_one(&left_source, &left_name)?.file;
-    let right = parse_one(&right_source, &right_name)?.file;
+    let left_parsed = parse_one(&left_source, &left_name)?;
+    let right_parsed = parse_one(&right_source, &right_name)?;
+    eprint!("{}", render::bundle(&left_parsed.diagnostics, &left_name, &left_source));
+    eprint!("{}", render::bundle(&right_parsed.diagnostics, &right_name, &right_source));
+    let (left, right) = (left_parsed.file, right_parsed.file);
 
     let delta = decpld_jedec::diff(&left, &right);
     if delta.is_empty() {
@@ -218,6 +228,18 @@ fn diff(before: &Path, after: &Path) -> Result<u8, Failure> {
 
     print!("{}", render_diff(&delta, &left_name, &right_name));
     Ok(FINDINGS)
+}
+
+/// One-line summary of a file that parsed. Pure, so it is testable
+/// without spawning a process (CLAUDE.md: logic that can be tested
+/// without going through the CLI must not live inside a CLI function).
+fn summarise(name: &str, file: &decpld_jedec::JedecFile) -> String {
+    format!(
+        "{name}: ok — {} fuses, default {}, checksum {:04X}",
+        file.fuses.len(),
+        u8::from(file.default_fuse),
+        file.computed_fuse_checksum()
+    )
 }
 
 /// Render a diff. Pure, so the formatting is testable without files.

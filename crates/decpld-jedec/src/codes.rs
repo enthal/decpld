@@ -30,6 +30,8 @@ pub const MISSING_FUSE_COUNT: DiagnosticCode = DiagnosticCode::new(3015);
 /// An `L` field ran its fuse number straight into its fuse states with
 /// no separator, so where the number ends cannot be determined.
 pub const AMBIGUOUS_FUSE_LIST: DiagnosticCode = DiagnosticCode::new(3016);
+/// `QF` declares more fuses than deCPLD will allocate for.
+pub const FUSE_COUNT_TOO_LARGE: DiagnosticCode = DiagnosticCode::new(3017);
 
 // ---- Checksums ----
 
@@ -46,6 +48,11 @@ pub const TRANSMISSION_CHECKSUM_MISMATCH: DiagnosticCode = DiagnosticCode::new(3
 pub const INVALID_DEFAULT_STATE: DiagnosticCode = DiagnosticCode::new(3030);
 /// A `G` field was neither `G0` nor `G1`.
 pub const INVALID_SECURITY_FIELD: DiagnosticCode = DiagnosticCode::new(3031);
+/// More than one `F` field.
+pub const DUPLICATE_DEFAULT_STATE: DiagnosticCode = DiagnosticCode::new(3032);
+/// An `F` field appeared after an `L` field, so which fuses it governs
+/// depends on reading order.
+pub const DEFAULT_STATE_AFTER_FUSE_LIST: DiagnosticCode = DiagnosticCode::new(3033);
 
 /// A field identifier that JEDEC 3A does not define.
 pub const UNKNOWN_FIELD: DiagnosticCode = DiagnosticCode::new(3040);
@@ -66,11 +73,14 @@ pub const ALL: &[DiagnosticCode] = &[
     DUPLICATE_FUSE_COUNT,
     MISSING_FUSE_COUNT,
     AMBIGUOUS_FUSE_LIST,
+    FUSE_COUNT_TOO_LARGE,
     INVALID_CHECKSUM_FIELD,
     FUSE_CHECKSUM_MISMATCH,
     TRANSMISSION_CHECKSUM_MISMATCH,
     INVALID_DEFAULT_STATE,
     INVALID_SECURITY_FIELD,
+    DUPLICATE_DEFAULT_STATE,
+    DEFAULT_STATE_AFTER_FUSE_LIST,
     UNKNOWN_FIELD,
     FIELD_DISCARDED,
     MISSING_TRANSMISSION_CHECKSUM,

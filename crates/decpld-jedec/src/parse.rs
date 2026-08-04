@@ -190,11 +190,49 @@ pub fn parse_with_mode(
         }
     }
 
+    // JEDEC 3A: `<fuse information> ::= [<default state>] <fuse list>
+    // {<fuse list>} [<fuse checksum>]` — at most ONE `F`, and it
+    // precedes the fuse lists.
+    //
+    // Both rules are enforced because the vector is built from `F`
+    // before any `L` is applied, so a second or late `F` would
+    // retroactively become the base for fuse lists that were written
+    // against a different default. `\x02h*QF8*F0*L0 1*F1*\x030000`
+    // silently produced 11111111 where a sequential reader gets
+    // 10000000 — a wrong fuse vector with no diagnostic, which is the
+    // one outcome this crate exists to prevent.
     let mut default_fuse = false;
+    let mut default_state_span: Option<TextRange> = None;
+    let first_fuse_list = fields.iter().find(|f| f.identifier == "L").map(|f| f.span);
     for field in &fields {
         if field.identifier != "F" {
             continue;
         }
+        if let Some(previous) = default_state_span {
+            diagnostics.push(
+                Diagnostic::error(codes::DUPLICATE_DEFAULT_STATE, "more than one F field")
+                    .with_label(Label::primary(at(field.span), "repeated here"))
+                    .with_label(Label::secondary(at(previous), "first declared here"))
+                    .with_note("JEDEC 3A allows at most one default-state field"),
+            );
+        }
+        // Checked independently of the duplicate rule, not as its
+        // `else`: a file can break both at once, and each names a
+        // different thing the author got wrong.
+        if let Some(list) = first_fuse_list
+            && field.span.start > list.start
+        {
+            diagnostics.push(
+                Diagnostic::error(
+                    codes::DEFAULT_STATE_AFTER_FUSE_LIST,
+                    "F field appears after an L field",
+                )
+                .with_label(Label::primary(at(field.span), "default state declared here"))
+                .with_label(Label::secondary(at(list), "but this fuse list came first"))
+                .with_note("JEDEC 3A places the default state before the fuse lists; after them, which fuses it governs depends on reading order"),
+            );
+        }
+        default_state_span = Some(field.span);
         match field.body.trim() {
             "0" => default_fuse = false,
             "1" => default_fuse = true,
@@ -223,6 +261,26 @@ pub fn parse_with_mode(
         }
         return Err(diagnostics);
     };
+
+    // `QF` alone drives allocation, so an unbounded value turns a
+    // 19-byte file into hundreds of megabytes (CLAUDE.md's fuzz rule:
+    // malformed input must never allocate unbounded). The ceiling is
+    // device-independent by design — this crate knows nothing about
+    // devices — and sits about a thousandfold above the ATF22V10's
+    // ~5900 fuses, so no real part comes close.
+    const MAX_FUSES: u32 = 8_000_000;
+    if count > MAX_FUSES {
+        diagnostics.push(
+            Diagnostic::error(
+                codes::FUSE_COUNT_TOO_LARGE,
+                format!(
+                    "QF declares {count} fuses, more than the {MAX_FUSES} deCPLD will allocate"
+                ),
+            )
+            .with_note("this is a guard against malformed input, not a device limit"),
+        );
+        return Err(diagnostics);
+    }
 
     let mut fuses = FuseVector::new(count, default_fuse);
     let mut notes = Vec::new();
@@ -1016,5 +1074,58 @@ mod tests {
         let span = diagnostic.primary_span().expect("a primary span");
         // The caret must land on the `2`, not on the field or the file.
         assert_eq!(&text[span.range], "2");
+    }
+}
+
+#[cfg(test)]
+mod review_findings {
+    use super::*;
+    use crate::codes;
+    use decpld_diagnostics::FileId;
+
+    const FILE: FileId = FileId(0);
+
+    fn codes_of(text: &str) -> Vec<u16> {
+        match parse(text, FILE) {
+            Ok(parsed) => panic!("expected rejection, got {} fuses", parsed.file.fuses.len()),
+            Err(bundle) => bundle.iter().map(|d| d.code.as_u16()).collect(),
+        }
+    }
+
+    #[test]
+    fn a_second_default_state_field_is_rejected() {
+        // Found by review with this exact input. It parsed with ZERO
+        // diagnostics and produced 11111111, where a reader honouring
+        // the F0 that actually precedes the L gets 10000000 — a wrong
+        // fuse vector, silently, which is the outcome this crate exists
+        // to prevent.
+        assert!(
+            codes_of("\x02h*QF8*F0*L0 1*F1*\x030000")
+                .contains(&codes::DEFAULT_STATE_AFTER_FUSE_LIST.as_u16())
+        );
+        assert!(
+            codes_of("\x02h*QF8*F0*F1*L0 1*\x030000")
+                .contains(&codes::DUPLICATE_DEFAULT_STATE.as_u16())
+        );
+    }
+
+    #[test]
+    fn a_default_state_after_a_fuse_list_is_rejected() {
+        assert!(
+            codes_of("\x02h*QF8*L0 1*F1*\x030000")
+                .contains(&codes::DEFAULT_STATE_AFTER_FUSE_LIST.as_u16())
+        );
+    }
+
+    #[test]
+    fn an_absurd_fuse_count_is_refused_rather_than_allocated() {
+        // A 19-byte file allocated 50 MB; QF4294967295 allocated 512 MB,
+        // and writing it would have collected a 4 GB Vec<bool>.
+        assert!(
+            codes_of("\x02h*QF4294967295*F0*\x030000")
+                .contains(&codes::FUSE_COUNT_TOO_LARGE.as_u16())
+        );
+        // A real device is nowhere near the ceiling.
+        assert!(parse("\x02h*QF5892*F0*\x030000", FILE).is_ok());
     }
 }
