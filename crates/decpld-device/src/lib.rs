@@ -33,7 +33,7 @@ pub use config::{
     ConfigField, ConfigFieldError, ConfigFieldId, FeedbackSource, LogicalOutputId, MacrocellConfig,
     MacrocellMode, MacrocellSpec, OutputPolarity, PhysicalDesign, PlacedCube,
 };
-pub use fuse_map::{FuseMap, FuseWriteError};
+pub use fuse_map::{FuseMap, FuseStatesError, FuseWriteError};
 pub use package::{
     ClockResourceId, InputResourceId, MacrocellId, PackageError, PackageId, PackagePin,
     PackageSpec, PadId, PinNumber, PowerRail,

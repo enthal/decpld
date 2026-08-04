@@ -48,6 +48,25 @@ pub enum FuseWriteError {
     NoSecurityFuse,
 }
 
+/// Why a fuse vector could not be read as this device's.
+///
+/// Distinct from [`FuseWriteError`], which is about an *encoder*
+/// claiming a fuse. These are about a vector that already exists —
+/// typically one a JEDEC file carried — failing to describe this part.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum FuseStatesError {
+    #[error("this device has {expected} fuses; the vector has {actual}")]
+    WrongLength { expected: u32, actual: usize },
+
+    /// A reserved fuse is a **hard error**, never a warning
+    /// (SPEC.md §13.2).
+    #[error(
+        "{fuse} is reserved in region `{region}` and must be {required}, but the vector \
+         has it {found}; a device in that state is not one the manufacturer defines"
+    )]
+    Reserved { fuse: FuseId, region: &'static str, required: bool, found: bool },
+}
+
 /// Every fuse of one device, and whether anything has claimed it.
 ///
 /// The `written` half is not bookkeeping: it is what turns "two encoders
@@ -96,6 +115,66 @@ impl FuseMap {
         }
 
         Self { bits, written, regions }
+    }
+
+    /// A device whose fuses somebody else already decided.
+    ///
+    /// The counterpart to [`Self::erased`], and the way a fuse vector
+    /// from a file this compiler did not write becomes something the
+    /// device layer can decode. Every fuse is marked **written**,
+    /// because the file stated all of them: leaving them unclaimed
+    /// would let an encoder later overwrite a value the file gave
+    /// without [`FuseWriteError::Conflict`] ever firing, which is the
+    /// whole reason the `written` half exists.
+    ///
+    /// The security fuse is accepted here even though
+    /// [`Self::set_security_fuse`] gates it, because that gate is about
+    /// the *act* of locking a part. A file that already carries the bit
+    /// is reporting a part somebody else locked, and refusing to read
+    /// it would leave the case a user most needs explained the one case
+    /// that cannot be.
+    ///
+    /// # Errors
+    ///
+    /// If the vector's length is not this device's fuse count — the
+    /// count is a file's claim about which part it is for, and padding
+    /// or truncating would silently decode a foreign file as this
+    /// device — or if it disagrees with a reserved fuse.
+    pub fn from_states(
+        regions: FuseRegions,
+        states: impl IntoIterator<Item = bool>,
+    ) -> Result<Self, FuseStatesError> {
+        let bits: Vec<bool> = states.into_iter().collect();
+        let expected = regions.count();
+        if bits.len() != expected as usize {
+            return Err(FuseStatesError::WrongLength { expected, actual: bits.len() });
+        }
+
+        for region in regions.iter() {
+            let FuseMutability::Reserved(required) = region.mutability else {
+                continue;
+            };
+            for fuse in region.range.clone() {
+                // Indexed through `get`, but a miss is a REFUSAL rather
+                // than a pass. The length check above plus
+                // `FuseRegions`' own `PastEnd` rule make it
+                // unreachable; defaulting to "compliant" would fail
+                // open if it ever became reachable, which is the wrong
+                // end of "prefer a rejected build to a wrong one".
+                let found = bits.get(fuse as usize).copied().unwrap_or(!required);
+                if found != required {
+                    return Err(FuseStatesError::Reserved {
+                        fuse: FuseId(fuse),
+                        region: region.name,
+                        required,
+                        found,
+                    });
+                }
+            }
+        }
+
+        let written = vec![true; bits.len()];
+        Ok(Self { bits, written, regions })
     }
 
     #[must_use]
@@ -262,6 +341,149 @@ impl FuseMap {
             .enumerate()
             .filter(|(_, written)| !**written)
             .map(|(index, _)| FuseId(index as u32))
+    }
+}
+
+// ---------------------------------------------------------------------
+// Loading a fuse vector somebody else produced.
+// ---------------------------------------------------------------------
+
+#[cfg(test)]
+mod from_states_tests {
+    use super::*;
+    use crate::region::FuseRegion;
+
+    /// One region of each mutability, so every rule has somewhere to
+    /// apply — the same shape `tests::device` uses.
+    fn device() -> FuseRegions {
+        FuseRegions::new(
+            16,
+            vec![
+                FuseRegion {
+                    name: "array",
+                    range: 0..8,
+                    erased_value: true,
+                    mutability: FuseMutability::Programmable,
+                },
+                FuseRegion {
+                    name: "reserved",
+                    range: 8..10,
+                    erased_value: true,
+                    mutability: FuseMutability::Reserved(false),
+                },
+                FuseRegion {
+                    name: "signature",
+                    range: 10..15,
+                    erased_value: true,
+                    mutability: FuseMutability::UserSignature,
+                },
+                FuseRegion {
+                    name: "security",
+                    range: 15..16,
+                    erased_value: false,
+                    mutability: FuseMutability::Security,
+                },
+            ],
+        )
+        .expect("a valid device")
+    }
+
+    #[test]
+    fn a_vector_loads_fuse_for_fuse() {
+        let states = [
+            true, false, true, true, false, false, true, false, // array
+            false, false, // reserved, at its required value
+            true, true, false, true, false, // signature
+            false, // security
+        ];
+        let map = FuseMap::from_states(device(), states).expect("a well-sized vector");
+        assert_eq!(map.len(), 16);
+        for (index, state) in states.iter().enumerate() {
+            let fuse = FuseId(u32::try_from(index).expect("sixteen fits"));
+            assert_eq!(map.get(fuse), Some(*state), "{fuse}");
+        }
+    }
+
+    #[test]
+    fn every_fuse_of_a_loaded_vector_is_marked_written() {
+        // The file stated all of them. Leaving them unwritten would let
+        // an encoder later overwrite a fuse the file gave a value to
+        // without the conflict being detected, which is the whole
+        // reason `written` exists.
+        let map = FuseMap::from_states(device(), [false; 16]).expect("well sized");
+        for fuse in 0..16 {
+            assert!(map.is_written(FuseId(fuse)), "fuse {fuse}");
+        }
+        assert_eq!(map.unwritten().count(), 0);
+    }
+
+    #[test]
+    fn a_vector_of_the_wrong_length_is_refused_naming_both_counts() {
+        // The count is the file's claim about which device it is for.
+        // Padding or truncating would decode a foreign file as this
+        // device, which is exactly the confusion `jed inspect` exists
+        // to resolve.
+        assert_eq!(
+            FuseMap::from_states(device(), [false; 15]),
+            Err(FuseStatesError::WrongLength { expected: 16, actual: 15 })
+        );
+        assert_eq!(
+            FuseMap::from_states(device(), [false; 17]),
+            Err(FuseStatesError::WrongLength { expected: 16, actual: 17 })
+        );
+    }
+
+    #[test]
+    fn a_vector_disagreeing_with_a_reserved_fuse_is_refused() {
+        // A reserved fuse is a hard error, never a warning
+        // (SPEC.md §13.2). A file that changes one describes a device
+        // in a state the manufacturer does not define, and describing
+        // it back as a valid design would lend it credibility it has
+        // not got.
+        let mut states = [false; 16];
+        states[9] = true;
+        assert_eq!(
+            FuseMap::from_states(device(), states),
+            Err(FuseStatesError::Reserved {
+                fuse: FuseId(9),
+                region: "reserved",
+                required: false,
+                found: true,
+            })
+        );
+    }
+
+    #[test]
+    fn a_loaded_vector_holds_the_same_states_the_map_it_came_from_did() {
+        // The bridge `jed inspect` runs on: a map's own states, taken
+        // out and put back, describe the same device. Only `written`
+        // differs, and deliberately — an erased map has claimed only
+        // its reserved fuses, a loaded one has a stated value for every
+        // fuse.
+        let mut original = FuseMap::erased(device());
+        original.set(FuseId(3), false).expect("programmable");
+        original.set(FuseId(11), false).expect("signature");
+
+        let states: Vec<bool> = original.iter().collect();
+        let loaded = FuseMap::from_states(device(), states).expect("well sized");
+        for fuse in 0..16 {
+            assert_eq!(loaded.get(FuseId(fuse)), original.get(FuseId(fuse)), "fuse {fuse}");
+        }
+        assert!(!original.is_written(FuseId(0)));
+        assert!(loaded.is_written(FuseId(0)));
+    }
+
+    #[test]
+    fn the_security_fuse_may_be_set_in_a_loaded_vector() {
+        // `set_security_fuse` gates the *act* of locking a part. A file
+        // that already carries `G1` is reporting a part somebody else
+        // locked, and refusing to read it would leave the one case
+        // where a user most needs to be told undescribable.
+        let mut states = [false; 16];
+        states[15] = true;
+        let map = FuseMap::from_states(device(), states).expect("well sized");
+        assert_eq!(map.get(FuseId(15)), Some(true));
+        assert_eq!(map.security_fuse(), Some(FuseId(15)));
     }
 }
 

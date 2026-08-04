@@ -1,0 +1,22 @@
+[package]
+name = "decpld-report"
+description = "Renders a physical design as a human- and machine-readable inspection report."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[dependencies]
+decpld-device.workspace = true
+decpld-logic.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+
+[lints]
+workspace = true
