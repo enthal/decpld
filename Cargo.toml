@@ -42,3 +42,8 @@ thiserror = "2"
 # enthal projects; SPEC.md Part VIII specifies a nested subcommand tree
 # that is not worth hand-rolling.
 clap = { version = "4", features = ["derive"] }
+
+# Property testing. The round-trip invariants in decpld-jedec are the
+# kind of claim that example tests can only sample and properties can
+# actually state.
+proptest = "1"

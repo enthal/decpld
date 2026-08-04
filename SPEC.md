@@ -1809,7 +1809,7 @@ Required support:
 
 ```rust
 pub struct JedecFile {
-    pub design_specification: Option<String>,
+    pub design_specification: String,
     pub fuses: FuseVector,
     pub default_fuse: bool,
     pub notes: Vec<String>,
@@ -1823,13 +1823,17 @@ pub struct JedecFile {
 Two deviations from the original sketch, both deliberate:
 
 - `fuse_count` and `fuses: BitVec` are collapsed into one `FuseVector`, which owns the count. A `fuse_count` that disagrees with the length of the fuse data is not a state worth being able to represent.
-- `design_specification` is added. The free-text header between STX and the first `*` is part of the file and must survive a rewrite. `None` means the file had no header; `Some("")` means it had an empty one — different facts when round-tripping.
+- `design_specification` is added, and is **not** optional. The free-text header between STX and the first `*` is part of the file and must survive a rewrite. JEDEC cannot express its absence — the header *is* the first field, so even `<STX>*…` has one, empty. An `Option` would let the type say something the format cannot; a round-trip property test found exactly that, with a `None` header returning as `Some("")` because there was nowhere to record the difference.
 
 `FuseVector` stores JEDEC's own 8-bit word layout: fuse *N* is bit `N % 8` of word `N / 8`, least-significant bit first. The fuse checksum is then the sum of the words, with no separate packing step that could be written backwards.
 
 The `L` field's separator between fuse number and fuse states is **required**, not merely conventional. Fuse states are `0` and `1`, which are also decimal digits, so without the separator the field is ambiguous and must be rejected rather than guessed at.
 
 Parser modes: strict, compatible, preserve-unknown. Writer styles: canonical, compact, WinCUPL-comparable.
+
+The writer always **recomputes** both checksums rather than copying what the input declared. Both are derived values: the fuse checksum from the fuse data, the transmission checksum from the emitted bytes. Preserving them would propagate a defect — a file carrying `C0000` ("not computed") should leave canonicalisation with a real checksum, and any file whose bytes changed must carry a new transmission checksum or it fails its own verification. The round-trip invariant is therefore stated over a file's *content* — header, fuses, default state, notes, security bit, and unmodelled fields — and not over its checksums or the source positions of its fields.
+
+JEDEC has no escape mechanism, so free text containing `*` cannot be encoded. The writer refuses rather than emitting a file that would silently read back as something else.
 
 Cross-check checksum implementations against WinCUPL, GALasm, Galette, and golden fixtures.
 

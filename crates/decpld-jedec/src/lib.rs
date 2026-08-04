@@ -13,6 +13,7 @@ mod checksum;
 mod fuses;
 mod model;
 mod parse;
+mod write;
 
 pub mod codes;
 
@@ -20,3 +21,4 @@ pub use checksum::{DUMMY_TRANSMISSION_CHECKSUM, transmission_checksum};
 pub use fuses::{FuseError, FuseVector};
 pub use model::{JedecField, JedecFile};
 pub use parse::{Parsed, ParserMode, parse, parse_with_mode};
+pub use write::{WriteError, WriterStyle, write};
