@@ -35,6 +35,13 @@ pub struct JedecDiff {
     pub security: Option<(Option<bool>, Option<bool>)>,
     pub design_specification: Option<(String, String)>,
     pub notes: Option<(Vec<String>, Vec<String>)>,
+    /// Fields deCPLD does not model, as `identifier body` pairs.
+    ///
+    /// Compared because [`JedecFile::describes_same_device_as`] compares
+    /// them, and two notions of "the same file" that disagree would let
+    /// `jed diff` bless a rewrite that silently deleted a device's test
+    /// vectors.
+    pub unknown_fields: Option<(Vec<String>, Vec<String>)>,
 }
 
 impl JedecDiff {
@@ -47,6 +54,7 @@ impl JedecDiff {
             && self.security.is_none()
             && self.design_specification.is_none()
             && self.notes.is_none()
+            && self.unknown_fields.is_none()
     }
 }
 
@@ -68,6 +76,10 @@ pub fn diff(before: &JedecFile, after: &JedecFile) -> JedecDiff {
     if before.notes != after.notes {
         out.notes = Some((before.notes.clone(), after.notes.clone()));
     }
+    if before.unknown_fields != after.unknown_fields {
+        out.unknown_fields =
+            Some((describe(&before.unknown_fields), describe(&after.unknown_fields)));
+    }
 
     if before.fuses.len() != after.fuses.len() {
         out.fuse_count = Some((before.fuses.len(), after.fuses.len()));
@@ -81,6 +93,12 @@ pub fn diff(before: &JedecFile, after: &JedecFile) -> JedecDiff {
     }
 
     out
+}
+
+/// Render unmodelled fields for reporting. `JedecField` equality ignores
+/// spans, so this shows only what is compared.
+fn describe(fields: &[crate::JedecField]) -> Vec<String> {
+    fields.iter().map(|f| format!("{}{}", f.identifier, f.body.trim())).collect()
 }
 
 #[cfg(test)]
@@ -138,6 +156,43 @@ mod tests {
         assert_eq!(d.fuse_count, Some((16, 32)));
         assert!(d.fuses.is_empty());
         assert!(!d.is_empty());
+    }
+
+    #[test]
+    fn a_dropped_unmodelled_field_is_a_difference() {
+        // `describes_same_device_as` counts unmodelled fields, and `diff`
+        // must agree with it: two notions of "the same file" that
+        // disagree would make `jed diff` bless a rewrite that silently
+        // deleted a device's test vectors — the exact loss
+        // preserve-unknown mode exists to prevent.
+        let a = file("\x02h*QF8*F0*L0 11110000*V0001 XXXX*\x030000");
+        let b = file("\x02h*QF8*F0*L0 11110000*\x030000");
+        let d = diff(&a, &b);
+        assert!(!d.is_empty(), "dropping a test vector is a difference");
+        assert!(d.unknown_fields.is_some(), "{d:#?}");
+        assert!(d.fuses.is_empty(), "the fuses did not change");
+    }
+
+    #[test]
+    fn diff_agrees_with_describes_same_device_as() {
+        // The two must never disagree. Stated directly so a future
+        // change to one is caught if it forgets the other.
+        let cases = [
+            ("\x02h*QF8*F0*L0 11110000*\x030000", "\x02h*QF8*F0*L0 11110000*\x030000", true),
+            ("\x02h*QF8*F0*L0 11110000*\x030000", "\x02h*QF8*F0*L0 11110001*\x030000", false),
+            ("\x02h*QF8*F0*V1 X*\x030000", "\x02h*QF8*F0*\x030000", false),
+            ("\x02one*QF8*F0*\x030000", "\x02two*QF8*F0*\x030000", false),
+            ("\x02h*QF8*F0*G1*\x030000", "\x02h*QF8*F0*\x030000", false),
+        ];
+        for (left, right, same) in cases {
+            let (a, b) = (file(left), file(right));
+            assert_eq!(
+                diff(&a, &b).is_empty(),
+                a.describes_same_device_as(&b),
+                "disagreement on {left:?} vs {right:?}"
+            );
+            assert_eq!(diff(&a, &b).is_empty(), same, "wrong verdict on {left:?}");
+        }
     }
 
     #[test]

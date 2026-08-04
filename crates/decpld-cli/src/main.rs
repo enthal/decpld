@@ -102,10 +102,17 @@ impl From<Style> for WriterStyle {
     }
 }
 
-/// Exit codes. `2` is clap's usage error, so failures start at 1 and
-/// leave it alone.
+/// Exit codes, following `diff(1)`: 0 nothing to report, 1 a finding, 2
+/// trouble.
+///
+/// The distinction is what makes these commands scriptable. Collapsing
+/// "the files differ" into the same code as "the file could not be read"
+/// would force every caller to parse stderr to tell a result from a
+/// failure. Clap already exits 2 on a usage error, which is trouble of
+/// exactly the same kind.
 const OK: u8 = 0;
-const FAILED: u8 = 1;
+const FINDINGS: u8 = 1;
+const TROUBLE: u8 = 2;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -119,18 +126,32 @@ fn main() -> ExitCode {
 
     match result {
         Ok(code) => ExitCode::from(code),
-        Err(message) => {
+        Err(Failure { message, code }) => {
             eprintln!("decpld: {message}");
-            ExitCode::from(FAILED)
+            ExitCode::from(code)
         }
     }
 }
 
-fn read(path: &Path) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
+/// A command failure: what went wrong, and how bad it is.
+struct Failure {
+    message: String,
+    code: u8,
 }
 
-fn validate(path: &Path, mode: ParserMode) -> Result<u8, String> {
+impl Failure {
+    /// The input was unreadable or malformed — the command could not do
+    /// its job at all.
+    fn trouble(message: impl Into<String>) -> Self {
+        Self { message: message.into(), code: TROUBLE }
+    }
+}
+
+fn read(path: &Path) -> Result<String, Failure> {
+    std::fs::read_to_string(path).map_err(|e| Failure::trouble(format!("{}: {e}", path.display())))
+}
+
+fn validate(path: &Path, mode: ParserMode) -> Result<u8, Failure> {
     let source = read(path)?;
     let name = path.display().to_string();
 
@@ -148,39 +169,41 @@ fn validate(path: &Path, mode: ParserMode) -> Result<u8, String> {
         }
         Err(bundle) => {
             eprint!("{}", render::bundle(&bundle, &name, &source));
-            Err(format!("{name}: not a valid JEDEC file"))
+            // A file failing validation is a *finding*: the command did
+            // its job and the answer is "no".
+            Err(Failure { message: format!("{name}: not a valid JEDEC file"), code: FINDINGS })
         }
     }
 }
 
-fn canonicalize(path: &Path, output: Option<&Path>, style: WriterStyle) -> Result<u8, String> {
+fn canonicalize(path: &Path, output: Option<&Path>, style: WriterStyle) -> Result<u8, Failure> {
     let source = read(path)?;
     let name = path.display().to_string();
 
     let parsed =
         parse_with_mode(&source, FileId(0), ParserMode::PreserveUnknown).map_err(|bundle| {
             eprint!("{}", render::bundle(&bundle, &name, &source));
-            format!("{name}: not a valid JEDEC file")
+            Failure::trouble(format!("{name}: not a valid JEDEC file"))
         })?;
 
-    let text = write(&parsed.file, style).map_err(|e| format!("{name}: {e}"))?;
+    let text = write(&parsed.file, style).map_err(|e| Failure::trouble(format!("{name}: {e}")))?;
 
     match output {
         Some(destination) => std::fs::write(destination, &text)
-            .map_err(|e| format!("{}: {e}", destination.display()))?,
+            .map_err(|e| Failure::trouble(format!("{}: {e}", destination.display())))?,
         None => print!("{text}"),
     }
     Ok(OK)
 }
 
-fn diff(before: &Path, after: &Path) -> Result<u8, String> {
+fn diff(before: &Path, after: &Path) -> Result<u8, Failure> {
     let (left_source, right_source) = (read(before)?, read(after)?);
     let (left_name, right_name) = (before.display().to_string(), after.display().to_string());
 
     let parse_one = |source: &str, name: &str| {
         parse_with_mode(source, FileId(0), ParserMode::PreserveUnknown).map_err(|bundle| {
             eprint!("{}", render::bundle(&bundle, name, source));
-            format!("{name}: not a valid JEDEC file")
+            Failure::trouble(format!("{name}: not a valid JEDEC file"))
         })
     };
 
@@ -194,7 +217,7 @@ fn diff(before: &Path, after: &Path) -> Result<u8, String> {
     }
 
     print!("{}", render_diff(&delta, &left_name, &right_name));
-    Ok(FAILED)
+    Ok(FINDINGS)
 }
 
 /// Render a diff. Pure, so the formatting is testable without files.
@@ -222,6 +245,9 @@ fn render_diff(delta: &JedecDiff, before: &str, after: &str) -> String {
     }
     if let Some((a, b)) = &delta.notes {
         let _ = writeln!(out, "notes: {a:?} -> {b:?}");
+    }
+    if let Some((a, b)) = &delta.unknown_fields {
+        let _ = writeln!(out, "unmodelled fields: {a:?} -> {b:?}");
     }
     for fuse in &delta.fuses {
         let _ = writeln!(
