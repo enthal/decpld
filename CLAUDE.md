@@ -55,7 +55,7 @@ The ATF22V10 and ATF16V8 fuse maps are the project's factual bedrock, and gettin
 - **A mapping becomes verified only when independent sources agree**: official documentation, open-source cross-checking (Galette, GALasm), controlled WinCUPL differential experiments, encode/decode invariants, and — the highest bar — physical hardware tests. `EvidenceLevel` (SPEC.md §5.31) records which of these a field has actually reached.
 - **Unverified hypotheses belong in oracle-analysis code or disabled experimental targets**, never in a production target definition.
 - **WinCUPL is an oracle, not an authority.** It is one witness among several and is not assumed infallible. Triangulate. Production compilation must never require WinCUPL, Wine, or Windows.
-- **Do not redistribute proprietary WinCUPL files**, device libraries, or embedded serial numbers. `.gitignore` blocks the install tree; only derived, normalized fixtures are committed. Oracle runs record wine version, WinCUPL version, executable and library hashes, and the exact command line (SPEC.md §5.9).
+- **Do not redistribute proprietary WinCUPL files**, device libraries, or embedded serial numbers. `.gitignore` blocks the install tree. WinCUPL's own output is not committed either: what goes in the repository is the experiment *input* and *recipe* — our `.pld` sources, the run metadata, and a runner — plus the measurements read out of the result, recorded in `targets/evidence/`. Freely-redistributable cross-checks (Galette, GALasm) are a separate case and their output may be committed with attribution. Oracle runs record wine version, WinCUPL version, executable and library hashes, and the exact command line (SPEC.md §5.9).
 
 ## Determinism is a first-class requirement
 

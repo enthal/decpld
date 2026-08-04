@@ -1,0 +1,17 @@
+Name     fb23;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Pin 23's own feedback, read by pin 22. */
+PIN 2  = i0;
+PIN 23 = q;
+PIN 22 = o0;
+
+q  = i0;
+o0 = q;

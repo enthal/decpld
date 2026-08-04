@@ -1,0 +1,19 @@
+Name     nfb14;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Complement of a FEEDBACK literal. The complement column was
+   measured on input pins only and generalised to all 22 sources;
+   feedback sources needed their own measurement. */
+PIN 2  = i0;
+PIN 14 = q;
+PIN 23 = o0;
+
+q  = i0;
+o0 = !q;

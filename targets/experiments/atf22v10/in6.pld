@@ -1,0 +1,16 @@
+Name     in6;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Which array column carries pin 6? Exactly one link stays
+   intact in the data term, and that column is the answer. */
+PIN 6 = i0;
+PIN 23 = o0;
+
+o0 = i0;

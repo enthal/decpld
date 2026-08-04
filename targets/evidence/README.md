@@ -9,7 +9,11 @@ The rule it exists to serve is in [CLAUDE.md](../../CLAUDE.md): **never enter a 
 - **[references.toml](references.toml)** — the primary sources, each with a URL, a `sha256`, a byte count, a retrieval date, and what it is authoritative for.
 - **[verify-references.sh](verify-references.sh)** — re-fetches each reference and checks it against the recorded hash.
 
-The documents themselves are **not committed**. They are third party and in some cases proprietary; `.gitignore` excludes PDFs and the JEDEC text from this directory. Run the verify script to fetch your own copies.
+The documents themselves are **not committed**. They are third party and in some cases proprietary. Run the verify script to fetch your own copies.
+
+`.gitignore` excludes everything in this directory *except* markdown, TOML, and shell — an allowlist by file type. That wording matters, and this README previously got it wrong by describing the rule as excluding "PDFs and the JEDEC text": the rule was actually a blanket exclude with three filenames allowed, so the first new evidence record written here was silently ignored. `git add -A` skipped it, the commit claiming to add it did not, and nothing failed. An evidence document that disappears quietly is worse than one never written, because the commit message asserts it exists.
+
+Evidence records are markdown and belong here. A fetched datasheet is a PDF or a text dump and stays out.
 
 ## Why hashes rather than revision strings
 

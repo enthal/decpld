@@ -1,0 +1,18 @@
+Name     fb16;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Pin 16 drives pin 23, so pin 23's data term names
+   pin 16's FEEDBACK column rather than an input column. */
+PIN 2  = i0;
+PIN 16 = q;
+PIN 23 = o0;
+
+q  = i0;
+o0 = q;

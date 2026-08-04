@@ -52,10 +52,10 @@ Decode WinCUPL and Galette output into macrocells and equations; encode canonica
 - [ ] Decode: fuse vector → `PhysicalDesign`
 - [ ] Invariants: matrix cells map 1:1 to fuses, no undocumented field overlap, every fuse classified, every legal configuration round-trips
 - [ ] `decpld jed inspect --device ATF22V10C` with a `--json` form
-- [ ] WinCUPL oracle harness (`tools/wincupl/`): wrapper, run metadata capture, fixture directories
-- [ ] Differential experiment suite: baseline, literal mapping, polarity, registered, OE, capacity
+- [x] WinCUPL oracle harness: runner, run-metadata capture, scratch run directories — [#30](https://github.com/enthal/decpld/pull/30). Lives at `targets/experiments/<device>/run.sh`, not `tools/wincupl/`, and keeps run output in a scratch directory rather than committed fixture directories (SPEC.md §5.14)
+- [x] Differential experiment suite: literal mapping, polarity, registered, feedback, macrocell, fuse-count modes, signature — [#30](https://github.com/enthal/decpld/pull/30). OE and capacity still to do
 - [ ] `decpld oracle diff` with delta classification
-- [ ] Evidence level recorded per field; `targets/evidence/` populated
+- [ ] Evidence level recorded per field; `targets/evidence/` populated — ATF22V10 fuse map measured and recorded in [#30](https://github.com/enthal/decpld/pull/30); per-field levels land with the target definition
 
 ## M2 — Minimal combinational language
 
