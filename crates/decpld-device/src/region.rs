@@ -99,6 +99,32 @@ pub enum RegionError {
 
     #[error("region `{name}` ends at {end}, past the device's {count} fuses")]
     PastEnd { name: &'static str, end: u32, count: u32 },
+
+    /// The security fuse must erase clear. SPEC.md §5.32 and CLAUDE.md
+    /// → Safety: a device that arrives "erased" with the readback lock
+    /// already engaged is unreadable before anything has programmed it.
+    #[error(
+        "security region `{name}` declares erased_value = true; the security fuse is \
+         clear by default and a device model may not say otherwise"
+    )]
+    SecurityErasesSet { name: &'static str },
+
+    /// One bit, so "the security fuse" names exactly one fuse.
+    #[error(
+        "security region `{name}` covers {len} fuses; the security fuse is a single bit, \
+         and a region spanning more could be half-programmed"
+    )]
+    SecurityNotOneFuse { name: &'static str, len: u32 },
+
+    /// More than one security region would make "the" security fuse
+    /// ambiguous, and `set_security_fuse` would lock only one of them.
+    #[error("a device has one security fuse, but `{first}` and `{second}` both claim to be it")]
+    SeveralSecurityRegions { first: &'static str, second: &'static str },
+
+    /// A device with no fuses is not a device; it is a definition
+    /// somebody forgot to fill in.
+    #[error("a device must have at least one fuse")]
+    NoFuses,
 }
 
 /// A device's regions, checked to classify every fuse exactly once.
@@ -144,20 +170,50 @@ impl FuseRegions {
             }
         }
 
+        if count == 0 {
+            // The one arrangement where "every fuse is classified" is
+            // vacuously true, so the type's guarantee would be empty.
+            return Err(RegionError::NoFuses);
+        }
+
+        let mut security_seen: Option<&'static str> = None;
+        for region in &regions {
+            if region.mutability != FuseMutability::Security {
+                continue;
+            }
+            if region.erased_value {
+                return Err(RegionError::SecurityErasesSet { name: region.name });
+            }
+            if region.len() != 1 {
+                return Err(RegionError::SecurityNotOneFuse {
+                    name: region.name,
+                    len: region.len(),
+                });
+            }
+            if let Some(first) = security_seen {
+                return Err(RegionError::SeveralSecurityRegions { first, second: region.name });
+            }
+            security_seen = Some(region.name);
+        }
+
         regions.sort_by_key(|region| region.range.start);
 
         let mut covered = 0u32;
+        let mut previous: Option<&FuseRegion> = None;
         for region in &regions {
             if region.range.start < covered {
-                // Sorted by start, so the previous region is the one it
-                // runs into.
-                let previous = regions
-                    .iter()
-                    .find(|other| other.range.end > region.range.start && other.name != region.name)
-                    .unwrap_or(region);
+                // The regions before this one are contiguous, so the
+                // immediately preceding one is always the container.
+                //
+                // Identifying it by *name* instead sent the author after
+                // the wrong region whenever two shared a name — and a
+                // copy-pasted name is exactly how a device model arrives
+                // at an overlap, so the message failed on the case it
+                // most needed to handle.
+                let container = previous.unwrap_or(region);
                 return Err(RegionError::Overlap {
-                    first: previous.name,
-                    first_range: previous.range.clone(),
+                    first: container.name,
+                    first_range: container.range.clone(),
                     second: region.name,
                     second_range: region.range.clone(),
                 });
@@ -166,6 +222,7 @@ impl FuseRegions {
                 return Err(RegionError::Unclassified { start: covered, end: region.range.start });
             }
             covered = region.range.end;
+            previous = Some(region);
         }
         if covered != count {
             return Err(RegionError::Unclassified { start: covered, end: count });
@@ -280,6 +337,85 @@ mod tests {
         let error = FuseRegions::new(16, vec![programmable("reversed", 10..4)])
             .expect_err("start after end");
         assert_eq!(error, RegionError::Backwards { name: "reversed", start: 10, end: 4 });
+    }
+
+    #[test]
+    fn an_overlap_names_the_region_it_ran_into_even_when_names_repeat() {
+        // Found by review. The container used to be located by *name*,
+        // so two regions sharing one sent the author after the wrong
+        // region — and a copy-pasted name is exactly how a device model
+        // arrives at an overlap, so the message failed on the case it
+        // most needed to handle.
+        let error = FuseRegions::new(16, vec![programmable("a", 0..10), programmable("a", 8..16)])
+            .expect_err("overlap");
+        assert_eq!(
+            error.to_string(),
+            "regions `a` (0..10) and `a` (8..16) overlap; a fuse cannot mean two things"
+        );
+    }
+
+    #[test]
+    fn a_security_region_must_erase_clear() {
+        // SPEC.md §5.32. A device arriving "erased" with the readback
+        // lock engaged is unreadable before anything has programmed it.
+        let error = FuseRegions::new(
+            2,
+            vec![
+                programmable("array", 0..1),
+                FuseRegion {
+                    name: "security",
+                    range: 1..2,
+                    erased_value: true,
+                    mutability: FuseMutability::Security,
+                },
+            ],
+        )
+        .expect_err("a security fuse may not erase set");
+        assert_eq!(error, RegionError::SecurityErasesSet { name: "security" });
+    }
+
+    #[test]
+    fn a_security_region_must_be_exactly_one_fuse() {
+        // Otherwise `set_security_fuse` could half-program it: neither
+        // readable nor protected, with the rest reported as unclaimed.
+        let error = FuseRegions::new(
+            4,
+            vec![
+                programmable("array", 0..1),
+                FuseRegion {
+                    name: "security",
+                    range: 1..4,
+                    erased_value: false,
+                    mutability: FuseMutability::Security,
+                },
+            ],
+        )
+        .expect_err("three fuses is not one bit");
+        assert_eq!(error, RegionError::SecurityNotOneFuse { name: "security", len: 3 });
+    }
+
+    #[test]
+    fn a_device_with_no_fuses_is_refused() {
+        // The one arrangement where "every fuse is classified" holds
+        // vacuously, making the type's guarantee empty.
+        assert_eq!(FuseRegions::new(0, vec![]).expect_err("not a device"), RegionError::NoFuses);
+    }
+
+    #[test]
+    fn error_messages_name_the_object_and_the_numbers() {
+        // CLAUDE.md: "errors identify object context". A diagnostic that
+        // says a region is wrong without saying which, or where, sends
+        // the reader back to the source to guess.
+        let unclassified =
+            FuseRegions::new(16, vec![programmable("low", 0..4)]).expect_err("gap").to_string();
+        assert!(unclassified.contains("4..16"), "{unclassified}");
+
+        let past_end = FuseRegions::new(8, vec![programmable("big", 0..99)])
+            .expect_err("past end")
+            .to_string();
+        assert!(past_end.contains("`big`") && past_end.contains("99"), "{past_end}");
+
+        assert_eq!(FuseId(42).to_string(), "fuse 42");
     }
 
     #[test]

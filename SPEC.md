@@ -1515,6 +1515,34 @@ Two deviations from the sketch, both deliberate:
 - `bits` and `written` are `Vec<bool>` rather than `BitVec`. The device layer has no packing *requirement* — `decpld-jedec` packs because the fuse checksum is defined over packed words, which is a statement about the format, not about memory. Here packing would save one byte per fuse on a part with under six thousand of them, in exchange for bit arithmetic in the one place this project can least afford an off-by-one.
 - `FuseMap` owns its `FuseRegions`. A fuse map without a classification cannot answer "may this fuse be written?", so the two are not separable without reintroducing the possibility of a map whose regions belong to a different device.
 
+The validated types, since the next crate builds on them:
+
+```rust
+pub struct FuseRegions { /* validated on construction; no other way in */ }
+
+pub enum RegionError {
+    Empty { name: &'static str, start: u32, end: u32 },
+    Backwards { name: &'static str, start: u32, end: u32 },
+    Overlap { first: &'static str, first_range: Range<u32>, second: &'static str, second_range: Range<u32> },
+    Unclassified { start: u32, end: u32 },
+    PastEnd { name: &'static str, end: u32, count: u32 },
+    SecurityErasesSet { name: &'static str },
+    SecurityNotOneFuse { name: &'static str, len: u32 },
+    SeveralSecurityRegions { first: &'static str, second: &'static str },
+    NoFuses,
+}
+
+pub enum FuseWriteError {
+    OutOfRange { fuse: FuseId, count: u32 },
+    Conflict { fuse: FuseId, region: &'static str, existing: bool, attempted: bool },
+    Reserved { fuse: FuseId, region: &'static str, required: bool },
+    Security { fuse: FuseId },
+    NoSecurityFuse,
+}
+```
+
+**The security fuse's guarantees are structural, not conventional.** A device model may not declare a security region that erases *set*, spans more than one fuse, or appears twice — all three are construction-time errors. Without the first, an "erased" map could arrive with the readback lock already engaged; without the second, `set_security_fuse` could half-program a region, which is the worst of the three outcomes since it is neither readable nor protected. Asking to lock a device that has no security fuse is an error rather than a silent success: the caller requested something irreversible, the device cannot do it, and answering "done" is the wrong end of "prefer a rejected build to a wrong one".
+
 `FuseRegions` is a validated type, and construction is the only way to obtain one: it checks that the regions partition `0..count` with no gap, no overlap, and no empty or backwards range. That makes §4.7's "every fuse is classified" and "fields do not overlap" hold for *every value of the type* rather than being asserted wherever someone remembers to — a device model that forgot a region cannot be built at all. Declaration order is not observable: the regions are sorted on construction, so a definition may list them in whatever order reads best (§2.5).
 
 Writing the same value twice is not a conflict. Two encoders agreeing is not a disagreement, and refusing it would make the order encoders run in observable. Writing a *different* value is refused, and the first write stands — averaging or last-writer-wins produces a device that behaves like neither design, with nothing to indicate it happened.

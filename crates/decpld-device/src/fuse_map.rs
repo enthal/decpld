@@ -35,6 +35,16 @@ pub enum FuseWriteError {
          it requires both --security-fuse and --acknowledge-readback-lock"
     )]
     Security { fuse: FuseId },
+
+    /// Asked to engage a permanent readback lock on a device that has
+    /// no such fuse.
+    ///
+    /// Reported rather than silently succeeding: the caller asked for
+    /// something irreversible, the device cannot do it, and answering
+    /// "done" is the wrong end of "prefer a rejected build to a wrong
+    /// one" on the one operation that cannot be undone.
+    #[error("this device has no security fuse, so it cannot be locked against readback")]
+    NoSecurityFuse,
 }
 
 /// Every fuse of one device, and whether anything has claimed it.
@@ -161,7 +171,7 @@ impl FuseMap {
         acknowledged_readback_lock: bool,
     ) -> Result<(), FuseWriteError> {
         let Some(fuse) = self.security_fuse() else {
-            return Ok(());
+            return Err(FuseWriteError::NoSecurityFuse);
         };
         if !acknowledged_readback_lock {
             return Err(FuseWriteError::Security { fuse });
@@ -173,6 +183,11 @@ impl FuseMap {
     }
 
     /// The device's security fuse, if it has one inside the fuse map.
+    ///
+    /// Exactly one fuse: `FuseRegions` rejects a security region that
+    /// spans more, so this cannot silently lock part of one. Half-locking
+    /// is the worst of the three outcomes — neither readable nor
+    /// protected, with the remainder reported as unclaimed.
     #[must_use]
     pub fn security_fuse(&self) -> Option<FuseId> {
         self.regions
