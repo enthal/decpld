@@ -724,7 +724,7 @@ fn classify(identifier: &str) -> IdentifierClass {
 /// called `QFxyz` instead of a malformed fuse count, and `N some note`
 /// would swallow the note. An unrecognised identifier still yields its
 /// leading letters, so genuinely unknown fields keep a usable name.
-fn split_identifier(field: &str) -> (&str, &str) {
+pub(crate) fn split_identifier(field: &str) -> (&str, &str) {
     for candidate in TWO_LETTER_IDENTIFIERS {
         if let Some(body) = field.strip_prefix(candidate) {
             return (&field[..candidate.len()], body);
@@ -1274,6 +1274,42 @@ mod identifier_tables {
         seen.sort_unstable();
         let alphabet: Vec<char> = ('A'..='Z').collect();
         assert_eq!(seen, alphabet, "the tables must cover A-Z exactly once");
+    }
+
+    #[test]
+    fn classify_agrees_with_the_transcribed_tables() {
+        // The partition test above checks the transcription against
+        // itself, which proves the transcription is self-consistent and
+        // nothing about the code. `classify` carries its own match arms,
+        // so without this the two could drift and only the partition
+        // would still hold.
+        //
+        // The other tests in this module reach `classify` through
+        // `parse`, which is the behavioural check; this is the direct
+        // one, and it covers the non-letter case the others cannot reach
+        // by iterating letters.
+        for letter in DEFINED {
+            assert_eq!(classify(&letter.to_string()), IdentifierClass::Defined, "{letter}");
+        }
+        for letter in RESERVED {
+            assert_eq!(classify(&letter.to_string()), IdentifierClass::Reserved, "{letter}");
+        }
+        for not_a_letter in ["", "1", "1abc", " ", "$", "*", "\u{e9}"] {
+            assert_eq!(
+                classify(not_a_letter),
+                IdentifierClass::NotInStandard,
+                "{not_a_letter:?} does not begin with a letter"
+            );
+        }
+        // Lower case is not the standard's alphabet either; no tool
+        // emits it, and accepting it would silently widen the table.
+        for lower in 'a'..='z' {
+            assert_eq!(
+                classify(&lower.to_string()),
+                IdentifierClass::NotInStandard,
+                "lower-case {lower}"
+            );
+        }
     }
 
     #[test]

@@ -48,6 +48,25 @@ pub enum WriteError {
     #[error("{context} contains U+{codepoint:04X}, which JEDEC cannot encode: {text:?}")]
     UnencodableCharacter { context: &'static str, codepoint: u32, text: String },
 
+    /// An unmodelled field cannot be written so that it reads back as
+    /// itself.
+    ///
+    /// JEDEC has no way to say "an empty identifier followed by a body
+    /// that starts with a letter": written out, the body becomes the
+    /// identifier. Caught precisely here rather than by the whole-file
+    /// round-trip guard, which would report it as an internal error —
+    /// this is a caller-fixable condition with an exact cause.
+    #[error(
+        "an unmodelled field cannot be encoded: identifier {identifier:?} with body {body:?} \
+         would read back as identifier {read_identifier:?} with body {read_body:?}"
+    )]
+    FieldNotRepresentable {
+        identifier: String,
+        body: String,
+        read_identifier: String,
+        read_body: String,
+    },
+
     /// The written file did not read back as the file it came from.
     ///
     /// Always a deCPLD bug rather than a user error, and reported rather
@@ -101,6 +120,7 @@ pub fn write(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError>
     // `render` below notes one such blind spot, where the parser's two
     // passes accept a field order the standard forbids. Conformance
     // comes from the fixtures and the oracle, not from here.
+    //
     // Compared against the file as the writer is *entitled* to emit it,
     // not against the caller's exact field order. Hoisting value fields
     // ahead of the programming fields is required by JEDEC 3A and is a
@@ -231,7 +251,25 @@ fn write_differing_fuses(out: &mut String, file: &JedecFile) {
 /// with no error raised anywhere.
 fn reject_unencodable_field(field: &JedecField) -> Result<(), WriteError> {
     reject_unencodable("an unmodelled field identifier", &field.identifier)?;
-    reject_unencodable("an unmodelled field", &field.body)
+    reject_unencodable("an unmodelled field", &field.body)?;
+
+    // Then the structural question: does this field survive its own
+    // notation? Asked by rendering it and splitting it back, rather than
+    // by a rule about which shapes are safe — a rule would have to be
+    // kept in step with `split_identifier` by hand, and this cannot
+    // drift from it because it calls it.
+    let rendered = join_field(&field.identifier, &field.body);
+    let inner = rendered.trim_end_matches(['\n', '*']);
+    let (read_identifier, read_body) = crate::parse::split_identifier(inner.trim_start());
+    if read_identifier != field.identifier || read_body.trim() != field.body {
+        return Err(WriteError::FieldNotRepresentable {
+            identifier: field.identifier.clone(),
+            body: field.body.clone(),
+            read_identifier: read_identifier.to_owned(),
+            read_body: read_body.trim().to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// JEDEC 3A's `<field character>` class, lines 158-160:
@@ -635,6 +673,55 @@ mod encodability {
         let error = write(&file, WriterStyle::Canonical).expect_err("refused");
         assert!(matches!(error, WriteError::AsteriskInText { .. }), "{error:?}");
         assert!(error.to_string().contains("terminate the field early"), "{error}");
+    }
+
+    #[test]
+    fn a_field_that_would_read_back_as_a_different_field_is_named_not_shrugged_at() {
+        // A hand-built field with no identifier and a body starting with
+        // a letter cannot be encoded: written as ` abc*` it reads back
+        // as identifier `abc` with an empty body. The whole-file
+        // round-trip guard already caught it — nothing was corrupted —
+        // but it reported "internal error … please report it", which is
+        // the same wrong diagnosis #19 exists to remove: this is a
+        // caller-fixable condition with an exact cause.
+        //
+        // Not reachable by parsing (split_identifier only yields an
+        // empty identifier when the body starts with a non-letter), so
+        // this is about the model being constructible directly.
+        let mut file = base();
+        file.unknown_fields.push(field("", "abc"));
+
+        let error = write(&file, WriterStyle::Canonical).expect_err("cannot be encoded");
+        assert!(
+            matches!(error, WriteError::FieldNotRepresentable { .. }),
+            "expected a named cause, got {error:?}"
+        );
+        let text = error.to_string();
+        assert!(text.contains("abc"), "must show what was asked for: {text}");
+    }
+
+    #[test]
+    fn a_field_whose_body_would_be_normalised_is_also_named() {
+        let mut file = base();
+        file.unknown_fields.push(field("", " lead"));
+        assert!(matches!(
+            write(&file, WriterStyle::Canonical),
+            Err(WriteError::FieldNotRepresentable { .. })
+        ));
+    }
+
+    #[test]
+    fn every_field_a_parse_can_produce_is_representable() {
+        // The counterpart: the check must not refuse anything the parser
+        // can actually hand back, or `canonicalize` would start failing
+        // on real files. These are the shapes that reach an empty
+        // identifier.
+        for body in ["123", "", "$xy", "1abc", "0", "  spaced  "] {
+            let text = format!("\x02h*QF8*F0*L0 11110000*{body}*\x030000");
+            let parsed = parse(&text, FILE).expect("parses").file;
+            write(&parsed, WriterStyle::Canonical)
+                .unwrap_or_else(|e| panic!("refused a field it parsed: {body:?}: {e}"));
+        }
     }
 
     #[test]
