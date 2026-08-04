@@ -28,8 +28,18 @@ Parse, validate, canonicalize, and rewrite known JEDEC files with correct checks
 - [x] Writer styles: canonical and compact — [#13](https://github.com/enthal/decpld/pull/13). WinCUPL-comparable deferred to M1: matching it requires real WinCUPL output to match against
 - [x] Line-ending and whitespace variants; unknown fields preserved and reported — [#12](https://github.com/enthal/decpld/pull/12)
 - [x] Property test: round-trip over random valid fuse vectors — [#13](https://github.com/enthal/decpld/pull/13)
-- [x] `decpld jed validate` / `canonicalize` / `diff` wired into the CLI — [#14](https://github.com/enthal/decpld/pull/14)
-- [x] `decpld-diagnostics`: `Span`, `FileId`, `LineIndex`, `Diagnostic`, severity, labels, notes, fixes, and stable diagnostic codes — [#9](https://github.com/enthal/decpld/pull/9)
+- [x] `decpld jed validate` / `canonicalize` / `diff` wired into the CLI — [#14](https://github.com/enthal/decpld/pull/14), [#15](https://github.com/enthal/decpld/pull/15) (exit codes), [#17](https://github.com/enthal/decpld/pull/17) (diagnostics to stderr)
+- [x] `decpld-diagnostics`: `Span`, `FileId`, `LineIndex`, `Diagnostic`, severity, labels, notes, fixes, and stable diagnostic codes — [#9](https://github.com/enthal/decpld/pull/9), [#17](https://github.com/enthal/decpld/pull/17) (line/column correctness)
+
+M0 hardening, from the sub-agent reviews over the milestone's diff:
+
+- [x] Silent-corruption fixes: bare-CR line termination, offsets inside a multi-byte unit, a writer that could emit text it could not reparse — [#17](https://github.com/enthal/decpld/pull/17)
+- [x] Contradictory `F` and `G` fields refused rather than resolved by reading order — [#17](https://github.com/enthal/decpld/pull/17)
+- [ ] JEDEC identifier tables re-transcribed with locators; reserved identifiers honoured — [#18](https://github.com/enthal/decpld/issues/18)
+- [ ] Writer refuses unencodable content by the standard's `<field character>` class — [#19](https://github.com/enthal/decpld/issues/19)
+- [ ] A file with no `F` field no longer silently means `F0` — [#20](https://github.com/enthal/decpld/issues/20)
+- [ ] `apply_fuse_list` applies atomically — [#21](https://github.com/enthal/decpld/issues/21)
+- [ ] SPEC.md sync and property-test coverage gaps — [#22](https://github.com/enthal/decpld/issues/22), [#23](https://github.com/enthal/decpld/issues/23)
 
 ## M1 — ATF22V10 decoder and encoder
 
