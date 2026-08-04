@@ -109,13 +109,19 @@ fn every_architecture_pair_is_written_including_the_nine_unused_ones() {
     // not use take the blank design's values (combinational, active
     // high) rather than being left to whatever the caller's map held.
     //
-    // Note this does NOT match WinCUPL, which leaves an undriven
-    // macrocell at S1 set, S0 clear — combinational, active *low*. The
-    // difference is inert: a macrocell whose output-enable row is off
-    // is tri-stated at either polarity, and the pin is undriven either
-    // way. It is recorded here rather than silently tolerated, because
-    // the whole-array comparisons above stop short of this region and
-    // a reader would otherwise assume they covered it.
+    // Note this does NOT match WinCUPL, which writes two different
+    // things depending on how a macrocell is unused. The `oe-*` runs
+    // measure both: a cell the design never mentions reads S0 clear,
+    // S1 clear (5810-5827 are all intact in every one of them), while
+    // `ioin14` … `ioin23` leave a cell used only as an *input* at S0
+    // clear, S1 set. deCPLD writes 1, 1 for every unused cell, which is
+    // neither.
+    //
+    // The difference is inert: a macrocell whose output-enable row is
+    // off is tri-stated at either polarity, and the pin is undriven
+    // either way. It is recorded here rather than silently tolerated,
+    // because the whole-array comparisons above stop short of this
+    // region and a reader would otherwise assume they covered it.
     let fuses = encode_design(&in2_design(), Footprint::Gal).expect("encodable");
     for fuse in 5808..5828 {
         assert!(fuses.is_written(FuseId(fuse)), "architecture fuse {fuse} left unwritten");
