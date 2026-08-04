@@ -1892,8 +1892,12 @@ mod missing_default_state {
             .expect("the diagnostic")
             .message
             .clone();
-        assert!(message.contains("12"), "must count the gap: {message}");
-        assert!(message.contains('4'), "must name the first unstated fuse: {message}");
+        // Asserted as whole phrases. `contains('4')` would have passed on
+        // the "1010" in the input echo, on a fuse count of 4, or on any
+        // stray digit — a test that cannot fail for the right reason is
+        // not a test.
+        assert!(message.contains("12 are not"), "must count the gap: {message}");
+        assert!(message.contains("first is fuse 4"), "must locate it: {message}");
     }
 
     #[test]
