@@ -54,6 +54,26 @@ pub fn write(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError>
     out.push_str("*\n");
 
     out.push_str(&format!("QF{}*\n", file.fuses.len()));
+
+    // JEDEC 3A, Value Fields: "The value fields must occur before any
+    // device programming or testing fields in the data file." A retained
+    // QP or QV must therefore be hoisted to sit beside QF, not left to
+    // trail after the L and C fields in whatever order it arrived.
+    //
+    // deCPLD's own parser does two passes and would not notice, which is
+    // precisely why this matters: the output is for other tools, and
+    // `canonicalize` emitting non-conformant files would defeat the
+    // command's whole purpose.
+    // The parser already hoists these, so for a parsed file this is a
+    // no-op. It is repeated here so the writer is correct on its own:
+    // a `JedecFile` built by hand still produces a conformant file.
+    let (value_fields, other_fields): (Vec<_>, Vec<_>) =
+        file.unknown_fields.iter().partition(|f| f.is_value_field());
+    for field in &value_fields {
+        reject_asterisk("an unmodelled field", &field.body)?;
+        out.push_str(&format!("{}{}*\n", field.identifier, field.body));
+    }
+
     out.push_str(if file.default_fuse { "F1*\n" } else { "F0*\n" });
 
     for note in &file.notes {
@@ -77,7 +97,7 @@ pub fn write(file: &JedecFile, style: WriterStyle) -> Result<String, WriteError>
     // checksum, not inherit the input's failure to have one.
     out.push_str(&format!("C{:04X}*\n", file.fuses.checksum()));
 
-    for field in &file.unknown_fields {
+    for field in &other_fields {
         reject_asterisk("an unmodelled field", &field.body)?;
         out.push_str(&format!("{}{}*\n", field.identifier, field.body));
     }
@@ -195,6 +215,61 @@ mod tests {
             include_str!("../../../targets/fixtures/jedec/galette-gal16v8-combinatorial.jed");
         round_trip(text, WriterStyle::Canonical);
         round_trip(text, WriterStyle::Compact);
+    }
+
+    #[test]
+    fn value_fields_are_written_before_programming_fields() {
+        // JEDEC 3A, Value Fields: "The value fields must occur before any
+        // device programming or testing fields in the data file." QP and
+        // QV are value fields, so a retained one must be hoisted to sit
+        // with QF rather than trailing after the L and C fields.
+        //
+        // deCPLD's own parser does two passes and would not notice, which
+        // is exactly why this needs asserting: the file is for other
+        // tools, and `canonicalize` producing non-conformant output would
+        // defeat the point of the command.
+        let text = "\x02h*QF16*QP20*F0*L0 1010000000000000*\x030000";
+        let file = parse(text, FILE).expect("parses").file;
+        let written = write(&file, WriterStyle::Canonical).expect("writes");
+
+        let qp = written.find("QP20*").expect("QP retained");
+        let first_l = written.find("L0").expect("an L field");
+        let c = written.find("C0").expect("a C field");
+        assert!(qp < first_l, "QP must precede the fuse list:\n{written}");
+        assert!(qp < c, "QP must precede the checksum:\n{written}");
+    }
+
+    #[test]
+    fn non_value_fields_stay_after_the_fuse_data() {
+        // Test vectors are testing fields and belong after the
+        // programming fields, so they must NOT be hoisted.
+        let text = "\x02h*QF8*F0*V0001 XXXX*L0 11110000*\x030000";
+        let file = parse(text, FILE).expect("parses").file;
+        let written = write(&file, WriterStyle::Canonical).expect("writes");
+
+        let v = written.find("V0001").expect("V retained");
+        let first_l = written.find("L0").expect("an L field");
+        assert!(v > first_l, "test vectors follow the fuse list:\n{written}");
+    }
+
+    #[test]
+    fn an_unmodelled_field_with_a_spaced_body_round_trips() {
+        // `QP 20*` and `QP20*` mean the same thing, and the model must
+        // pick one representation at parse time. Normalising on the way
+        // *out* instead would make a file differ from its own
+        // canonicalisation — and, because the diff renderer trims for
+        // display too, report it as `["QP20"] -> ["QP20"]`: a difference
+        // with nothing visibly different, which is worse than either
+        // answer alone.
+        round_trip("\x02h*QF8*QP 20*F0*L0 11110000*\x030000", WriterStyle::Canonical);
+    }
+
+    #[test]
+    fn unmodelled_field_bodies_are_normalised_at_parse_time() {
+        let spaced = parse("\x02h*QF8*QP 20*F0*\x030000", FILE).expect("parses").file;
+        let tight = parse("\x02h*QF8*QP20*F0*\x030000", FILE).expect("parses").file;
+        assert_eq!(spaced.unknown_fields, tight.unknown_fields);
+        assert!(spaced.describes_same_device_as(&tight));
     }
 
     #[test]

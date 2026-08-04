@@ -12,10 +12,49 @@
 //! counterexample arrives minimal rather than as a 2000-fuse haystack.
 
 use decpld_diagnostics::FileId;
-use decpld_jedec::{FuseVector, JedecFile, ParserMode, WriterStyle, parse, parse_with_mode, write};
+use decpld_diagnostics::{Span, TextRange};
+use decpld_jedec::{
+    FuseVector, JedecField, JedecFile, ParserMode, WriterStyle, parse, parse_with_mode, write,
+};
 use proptest::prelude::*;
 
 const FILE: FileId = FileId(0);
+
+/// Unmodelled fields, drawn from real JEDEC identifiers.
+///
+/// Included because their absence hid a bug: the writer normalised field
+/// bodies on the way *out*, so `QP 20*` came back as `QP20*` and a file
+/// differed from its own canonicalisation. A property that never
+/// generated these could not have found it — which is the argument for
+/// generating every field the model can hold, not just the interesting
+/// ones.
+fn any_unknown_fields() -> impl Strategy<Value = Vec<JedecField>> {
+    let field = prop_oneof![
+        // A value field, which the writer must hoist ahead of the fuse
+        // data, and a testing field, which it must not.
+        Just(("QP", "20")),
+        Just(("QV", "8")),
+        Just(("V", "0001 XXXXNHHHL")),
+        Just(("X", "0")),
+        Just(("P", "1 2 3 4")),
+    ]
+    .prop_map(|(identifier, body)| JedecField {
+        identifier: identifier.to_owned(),
+        body: body.to_owned(),
+        span: Span::new(FILE, TextRange::empty_at(0)),
+    });
+    // Value fields first, matching the canonical order the parser
+    // establishes. A `JedecFile` is expected to hold them that way —
+    // JEDEC 3A requires value fields before programming and testing
+    // fields, so a model that stored them interleaved would describe a
+    // file that cannot legally be written. The writer hoists too, so a
+    // hand-built file still comes out conformant; that path has its own
+    // example test.
+    proptest::collection::vec(field, 0..4).prop_map(|mut fields| {
+        fields.sort_by_key(|f| !f.is_value_field());
+        fields
+    })
+}
 
 /// A file with an arbitrary fuse vector, default state, and metadata.
 fn any_jedec_file() -> impl Strategy<Value = JedecFile> {
@@ -29,9 +68,10 @@ fn any_jedec_file() -> impl Strategy<Value = JedecFile> {
                 Just(default),
                 Just(has_header),
                 Just(security),
+                any_unknown_fields(),
             )
         })
-        .prop_map(|(states, default_fuse, has_header, security)| {
+        .prop_map(|(states, default_fuse, has_header, security, unknown_fields)| {
             let mut fuses = FuseVector::new(states.len() as u32, default_fuse);
             for (index, state) in states.iter().enumerate() {
                 fuses.set(index as u32, *state).expect("in range by construction");
@@ -48,7 +88,7 @@ fn any_jedec_file() -> impl Strategy<Value = JedecFile> {
                 security,
                 fuse_checksum: None,
                 transmission_checksum: None,
-                unknown_fields: Vec::new(),
+                unknown_fields,
             }
         })
 }

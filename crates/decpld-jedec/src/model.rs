@@ -18,6 +18,15 @@ pub struct JedecField {
     pub span: Span,
 }
 
+impl JedecField {
+    /// Whether this is a JEDEC 3A *value* field (`QF`, `QP`, `QV`),
+    /// which must precede every programming and testing field.
+    #[must_use]
+    pub fn is_value_field(&self) -> bool {
+        matches!(self.identifier.as_str(), "QF" | "QP" | "QV")
+    }
+}
+
 /// Two fields are the same field when they say the same thing.
 ///
 /// `span` is deliberately excluded. A field that survives a rewrite
@@ -75,6 +84,13 @@ pub struct JedecFile {
     pub transmission_checksum: Option<u16>,
 
     /// Fields retained but not modelled. See [`JedecField`].
+    ///
+    /// Held with value fields (`QP`, `QV`) first, which is the order
+    /// JEDEC 3A requires them to be written in. The parser establishes
+    /// this and the writer re-establishes it, so a hand-built file is
+    /// still emitted conformantly — but code constructing a `JedecFile`
+    /// directly should keep to the order, or a file will not compare
+    /// equal to its own canonicalisation.
     pub unknown_fields: Vec<JedecField>,
 }
 

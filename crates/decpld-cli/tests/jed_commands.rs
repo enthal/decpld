@@ -112,6 +112,72 @@ fn a_missing_file_is_an_error_not_a_panic() {
     assert!(stderr(&out).contains("decpld:"), "{}", stderr(&out));
 }
 
+#[test]
+fn exit_codes_distinguish_a_finding_from_trouble() {
+    // `diff(1)` convention: 0 nothing to report, 1 a finding, 2 trouble.
+    // Collapsing them would force every caller to parse stderr to tell
+    // "these files differ" from "I could not read that file".
+    let dir = TempDir::new("exit-codes");
+    let good = dir.write("good.jed", GALETTE);
+    let invalid = dir.write("invalid.jed", "\x02h*QF8*F0*L0 1012*\x030000");
+
+    assert_eq!(decpld(&["jed", "validate", &arg(&good)]).status.code(), Some(0));
+    assert_eq!(
+        decpld(&["jed", "validate", &arg(&invalid)]).status.code(),
+        Some(1),
+        "an invalid file is a finding: the command answered the question"
+    );
+    assert_eq!(
+        decpld(&["jed", "validate", "/nonexistent/decpld/nope.jed"]).status.code(),
+        Some(2),
+        "an unreadable file is trouble: the command could not answer at all"
+    );
+}
+
+#[test]
+fn diff_exits_one_for_a_difference_and_two_for_an_unreadable_file() {
+    let dir = TempDir::new("diff-exit");
+    let a = dir.write("a.jed", "\x02h*QF16*F0*L0 1010000000000000*\x030000");
+    let b = dir.write("b.jed", "\x02h*QF16*F0*L0 1011000000000000*\x030000");
+
+    assert_eq!(decpld(&["jed", "diff", &arg(&a), &arg(&a)]).status.code(), Some(0));
+    assert_eq!(decpld(&["jed", "diff", &arg(&a), &arg(&b)]).status.code(), Some(1));
+    assert_eq!(
+        decpld(&["jed", "diff", &arg(&a), "/nonexistent/decpld/nope.jed"]).status.code(),
+        Some(2)
+    );
+}
+
+#[test]
+fn diff_notices_a_dropped_test_vector() {
+    // The fuses are identical; a test vector vanished. Reporting "same
+    // device" would bless exactly the silent data loss that
+    // preserve-unknown mode exists to prevent.
+    let dir = TempDir::new("diff-vectors");
+    let a = dir.write("a.jed", "\x02h*QF8*F0*L0 11110000*V0001 XXXX*\x030000");
+    let b = dir.write("b.jed", "\x02h*QF8*F0*L0 11110000*\x030000");
+
+    let out = decpld(&["jed", "diff", &arg(&a), &arg(&b)]);
+    assert_eq!(out.status.code(), Some(1), "stdout: {}", stdout(&out));
+    assert!(stdout(&out).contains("unmodelled fields"), "{}", stdout(&out));
+}
+
+#[test]
+fn canonicalize_puts_value_fields_before_the_fuse_list() {
+    // JEDEC 3A requires value fields (QF/QP/QV) before any programming
+    // or testing field. deCPLD's own parser does two passes and would
+    // not care; other tools may.
+    let dir = TempDir::new("canon-order");
+    let input = dir.write("in.jed", "\x02h*QF16*QP20*F0*L0 1010000000000000*\x030000");
+
+    let out = decpld(&["jed", "canonicalize", &arg(&input)]);
+    assert!(out.status.success());
+    let text = stdout(&out);
+    let qp = text.find("QP20*").expect("QP retained");
+    let l = text.find("L0").expect("an L field");
+    assert!(qp < l, "value fields must come first:\n{text}");
+}
+
 // ---- canonicalize ----
 
 #[test]

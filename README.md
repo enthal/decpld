@@ -178,6 +178,8 @@ fuse 3: 0 -> 1
 
 That distinction is what makes the command worth having over `diff(1)`, and it is the foundation the device work builds on: reverse-engineering a fuse map means changing one thing and seeing which *fuses* moved.
 
+Exit codes follow `diff(1)` so the commands compose into scripts: **0** nothing to report, **1** a finding (the file is invalid, or the two files differ), **2** trouble (unreadable file, bad usage). "These files differ" and "I could not read that file" are different answers and must not share a code.
+
 Rust **1.95+** is required and pinned in [rust-toolchain.toml](rust-toolchain.toml); `rustup` installs it automatically on the first `cargo` invocation.
 
 ## Development
