@@ -2,9 +2,7 @@
 
 ## Complete project, language, compiler, device-backend, CLI, LSP, and verification specification
 
-**Purpose:** a modern Rust compiler and hardware-description language for
-Microchip ATF22V10 and ATF16V8 simple programmable logic devices, designed to
-replace WinCUPL for ordinary design, synthesis, fitting, and JEDEC generation.
+**Purpose:** a modern Rust compiler and hardware-description language for Microchip ATF22V10 and ATF16V8 simple programmable logic devices, designed to replace WinCUPL for ordinary design, synthesis, fitting, and JEDEC generation.
 
 **Name and pronunciation:** **deCPLD** is pronounced like *decoupled*:
 **dee·kuh·pld** (/diːˈkʌpld/).
@@ -16,16 +14,13 @@ replace WinCUPL for ordinary design, synthesis, fitting, and JEDEC generation.
 - Primary output: JEDEC fuse maps (`*.jed`)
 - Implementation language: Rust
 
-**Status:** normative implementation specification and authoritative project document. A capable human or AI
-coding agent should be able to implement the complete system from this
-document.
+**Status:** normative implementation specification and authoritative project document. A capable human or AI coding agent should be able to implement the complete system from this document.
 
 ---
 
 ## 1. Objective
 
-deCPLD replaces WinCUPL as the design-entry, elaboration, synthesis, fitting,
-inspection, and JEDEC-generation tool for small PAL/GAL-compatible devices.
+deCPLD replaces WinCUPL as the design-entry, elaboration, synthesis, fitting, inspection, and JEDEC-generation tool for small PAL/GAL-compatible devices.
 
 The first release shall support:
 
@@ -43,10 +38,7 @@ The first release shall support:
 - formal or exhaustive equivalence checks;
 - a package-aware CLI and LSP.
 
-The compiler ends at a valid `.jed` file. High-voltage programming algorithms
-and programmer hardware protocols are outside the primary compiler. Existing
-software such as `minipro` may be invoked only through an explicit convenience
-command.
+The compiler ends at a valid `.jed` file. High-voltage programming algorithms and programmer hardware protocols are outside the primary compiler. Existing software such as `minipro` may be invoked only through an explicit convenience command.
 
 ```text
 deCPLD package
@@ -66,8 +58,7 @@ JEDEC
 ATF22V10 / ATF16V8
 ```
 
-WinCUPL is a development oracle only. Production compilation must not require
-WinCUPL, Wine, or Windows.
+WinCUPL is a development oracle only. Production compilation must not require WinCUPL, Wine, or Windows.
 
 ---
 
@@ -75,8 +66,7 @@ WinCUPL, Wine, or Windows.
 
 ### 2.1 Signals, not `wire` and `reg`
 
-The source declaration keyword is `signal`. It names a digital signal and its
-shape without claiming storage class or physical direction.
+The source declaration keyword is `signal`. It names a digital signal and its shape without claiming storage class or physical direction.
 
 The compiler infers:
 
@@ -84,8 +74,7 @@ The compiler infers:
 - combinational or registered implementation;
 - clock and feedback requirements.
 
-Module boundaries remain explicit through `port`; module interfaces are never
-inferred from incidental use.
+Module boundaries remain explicit through `port`; module interfaces are never inferred from incidental use.
 
 ### 2.2 One producer per signal bit
 
@@ -95,28 +84,21 @@ Every signal bit has exactly one producer:
 - one combinational definition; or
 - one clocked next-state definition.
 
-A curly-brace target is one composite assignment. Its constituent bits must be
-disjoint from every other producer target.
+A curly-brace target is one composite assignment. Its constituent bits must be disjoint from every other producer target.
 
 ### 2.3 No inferred latches
 
 A combinational value must be defined for all paths.
 
-Within `on posedge`, omitted assignment under a condition means that the
-register retains its current state. This is D-input feedback, not a
-level-sensitive latch.
+Within `on posedge`, omitted assignment under a condition means that the register retains its current state. This is D-input feedback, not a level-sensitive latch.
 
 ### 2.4 Expressions define hardware values
 
-`if` and `match` are expressions. Multiple outputs are represented by one
-curly-brace packed vector expression and destructuring target.
+`if` and `match` are expressions. Multiple outputs are represented by one curly-brace packed vector expression and destructuring target.
 
 ### 2.5 Declaration order never matters
 
-Files and declarations are indexed before bodies are resolved. A top or module
-may refer to declarations appearing later in the file or anywhere else in the
-package. File order, declaration order, and source-root order have no semantic
-effect.
+Files and declarations are indexed before bodies are resolved. A top or module may refer to declarations appearing later in the file or anywhere else in the package. File order, declaration order, and source-root order have no semantic effect.
 
 Recommended style is root-first:
 
@@ -129,27 +111,19 @@ The formatter never reorders declarations.
 
 ### 2.6 Strict widths and signedness
 
-Unsized integer literals are exact mathematical values until context supplies a
-width. No silent narrowing occurs. Unsigned widening zero-extends; signed
-widening sign-extends. Mixed-signedness arithmetic requires explicit conversion.
+Unsized integer literals are exact mathematical values until context supplies a width. No silent narrowing occurs. Unsigned widening zero-extends; signed widening sign-extends. Mixed-signedness arithmetic requires explicit conversion.
 
 ### 2.7 Named module arguments only
 
-Parameters and ports are connected by name. Positional instantiation is not
-part of the language.
+Parameters and ports are connected by name. Positional instantiation is not part of the language.
 
 ### 2.8 Explicit package boundaries
 
-Directories form hierarchical packages. Declarations are private to their
-exact package by default. `public` exposes a declaration outside that package.
-Subpackages do not receive private access to parents. There is no `export`
-keyword or export list.
+Directories form hierarchical packages. Declarations are private to their exact package by default. `public` exposes a declaration outside that package. Subpackages do not receive private access to parents. There is no `export` keyword or export list.
 
 ### 2.9 Verified device knowledge
 
-Targets are typed Rust specifications. Every fuse mapping must be supported by
-official documentation, independent open-source cross-checking, controlled
-WinCUPL differential experiments, encode/decode invariants, or hardware tests.
+Targets are typed Rust specifications. Every fuse mapping must be supported by official documentation, independent open-source cross-checking, controlled WinCUPL differential experiments, encode/decode invariants, or hardware tests.
 
 ---
 
@@ -183,8 +157,7 @@ decpld/
 └── tools/wincupl/
 ```
 
-The CLI and LSP use the same parser, package index, resolver, elaborator, type
-checker, diagnostics, and target registry.
+The CLI and LSP use the same parser, package index, resolver, elaborator, type checker, diagnostics, and target registry.
 
 ---
 
@@ -202,8 +175,7 @@ No `decpld.toml` is required. The file forms one implicit package.
 
 ### 1.1.2 Package mode
 
-More than one file, external dependencies, multiple source roots, or persistent
-project settings use `decpld.toml`.
+More than one file, external dependencies, multiple source roots, or persistent project settings use `decpld.toml`.
 
 ```toml
 [package]
@@ -289,21 +261,15 @@ which yields:
 display.counters
 ```
 
-The declaration adds exactly one segment; it does not replace the
-directory-derived path.
+The declaration adds exactly one segment; it does not replace the directory-derived path.
 
 ### 1.2.2 Package and file independence
 
-A package may span many files. A file may contain many declarations. File names
-do not need to match declaration names. File boundaries and ordering have no
-semantic effect beyond deriving package location and hosting file-scoped `use`
-aliases.
+A package may span many files. A file may contain many declarations. File names do not need to match declaration names. File boundaries and ordering have no semantic effect beyond deriving package location and hosting file-scoped `use` aliases.
 
 ### 1.2.3 Duplicate names
 
-Two declarations with the same name in the same package are errors. A name may
-not simultaneously identify a declaration and a child package in the same
-parent package.
+Two declarations with the same name in the same package are errors. A name may not simultaneously identify a declaration and a child package in the same parent package.
 
 ## 1.3 Visibility and name resolution
 
@@ -328,8 +294,7 @@ Rules:
 - sibling packages are distinct;
 - `public` is the only visibility modifier;
 - there is no `export` keyword;
-- module `param` and `port` declarations are members of the module interface and
-  need no visibility modifier;
+- module `param` and `port` declarations are members of the module interface and need no visibility modifier;
 - internal signals are never externally addressable.
 
 ### 1.3.1 Qualified names
@@ -357,8 +322,7 @@ components.io.Debouncer reset_filter {
 
 ### 1.3.2 `use`
 
-`use` creates file-scoped aliases only. It does not discover files, add
-dependencies, alter package membership, or bypass visibility.
+`use` creates file-scoped aliases only. It does not discover files, add dependencies, alter package membership, or bypass visibility.
 
 ```decpld
 use display.counter.Counter;
@@ -385,8 +349,7 @@ Lookup order for an unqualified name:
 5. built-ins;
 6. otherwise error.
 
-The compiler never searches arbitrary sibling packages or undeclared external
-dependencies.
+The compiler never searches arbitrary sibling packages or undeclared external dependencies.
 
 ## 1.4 Tops and devices
 
@@ -419,8 +382,7 @@ Rules:
 - a top may instantiate ordinary modules;
 - a module may not instantiate a top.
 
-The source target is authoritative. CLI `--device` and `--package` options are
-checked assertions and must agree.
+The source target is authoritative. CLI `--device` and `--package` options are checked assertions and must agree.
 
 ## 1.5 Lexical syntax and documentation
 
@@ -453,9 +415,7 @@ public module Counter {
 }
 ```
 
-Consecutive `///` lines form one documentation block. Documentation is retained
-in the syntax tree and HIR and is exposed through LSP hover, completion,
-signature help, symbols, and generated documentation.
+Consecutive `///` lines form one documentation block. Documentation is retained in the syntax tree and HIR and is exposed through LSP hover, completion, signature help, symbols, and generated documentation.
 
 ## 1.6 Runtime type: `signal`
 
@@ -466,8 +426,7 @@ signal[4][8] matrix;
 signal signed[8] delta;
 ```
 
-`signal` denotes a digital signal. It does not by itself mean combinational,
-registered, input, or output.
+`signal` denotes a digital signal. It does not by itself mean combinational, registered, input, or output.
 
 - `signal` has width one;
 - `signal[N]` is an ordered packed vector of `N` bits;
@@ -1194,9 +1153,7 @@ For each file:
 7. attach file-scoped `use` aliases;
 8. diagnose duplicate names and declaration/package collisions.
 
-The resolver checks exact-package privacy before returning an external
-declaration. `public` is represented on the declaration, not in a separate
-export table.
+The resolver checks exact-package privacy before returning an external declaration. `public` is represented on the declaration, not in a separate export table.
 
 Top selection occurs after package indexing and before elaboration.
 
@@ -2125,8 +2082,7 @@ A single source file requires no manifest:
 decpld build design.decpld
 ```
 
-The implicit package contains only that file. It may contain any number of modules,
-enums, constants, and tops.
+The implicit package contains only that file. It may contain any number of modules, enums, constants, and tops.
 
 Top selection rules:
 
@@ -2142,8 +2098,7 @@ Single-file mode has no external package dependencies.
 
 ### 5.16.2 Multi-file package mode
 
-A `decpld.toml` manifest defines the package source roots, dependencies, and
-persistent options.
+A `decpld.toml` manifest defines the package source roots, dependencies, and persistent options.
 
 ```toml
 [package]
@@ -2159,15 +2114,13 @@ components = { path = "../components" }
 optimization = 2
 ```
 
-All `.decpld` files recursively beneath each source root belong to the package.
-Directory paths relative to a source root determine package namespaces.
+All `.decpld` files recursively beneath each source root belong to the package. Directory paths relative to a source root determine package namespaces.
 
 ```bash
 decpld build --top deCPLDer
 ```
 
-When no manifest is present, multiple local source roots may be supplied
-explicitly:
+When no manifest is present, multiple local source roots may be supplied explicitly:
 
 ```bash
 decpld build \
@@ -2176,14 +2129,9 @@ decpld build \
   --top deCPLDer
 ```
 
-`--source-root` may be repeated. This creates an implicit local package but does
-not support external dependencies. The shorter alias `--dir` may be accepted,
-but documentation and diagnostics should use `--source-root`.
+`--source-root` may be repeated. This creates an implicit local package but does not support external dependencies. The shorter alias `--dir` may be accepted, but documentation and diagnostics should use `--source-root`.
 
-The compiler indexes the entire package, selects one named top, and elaborates
-only the module graph reachable from that top. Syntax, duplicate-name,
-visibility, and interface errors are package-level; device fitting applies only
-to the selected reachable design.
+The compiler indexes the entire package, selects one named top, and elaborates only the module graph reachable from that top. Syntax, duplicate-name, visibility, and interface errors are package-level; device fitting applies only to the selected reachable design.
 
 ### 5.16.3 Build options
 
