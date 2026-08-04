@@ -1,0 +1,20 @@
+Name     ioin15;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* Pin 15 is never driven -- it is used only as an INPUT to pin 23.
+   Does an I/O pin reach the array without its own macrocell producing
+   an output, and through which column? Measured for every macrocell
+   rather than generalised from one, because "an I/O pin can be an
+   input" is a claim about ten pins. */
+
+PIN 15 = a;
+PIN 23 = o0;
+
+o0 = a;

@@ -1628,9 +1628,27 @@ pub struct MacrocellConfig {
 
 ```rust
 pub struct PackageSpec {
-    pub id: PackageId,
-    pub name: &'static str,
-    pub pins: BTreeMap<PinNumber, PackagePin>,
+    // Private: validated on construction, so there is no way to
+    // assemble one that violates the uniqueness rules below.
+    id: PackageId,
+    name: &'static str,
+    pins_by_number: BTreeMap<PinNumber, PackagePin>,
+}
+
+impl PackageSpec {
+    pub fn new(
+        id: PackageId,
+        name: &'static str,
+        pins: impl IntoIterator<Item = (PinNumber, PackagePin)>,
+    ) -> Result<Self, PackageError>;
+
+    pub fn id(&self) -> PackageId;
+    pub fn name(&self) -> &'static str;
+    pub fn pin(&self, number: PinNumber) -> Option<PackagePin>;
+    pub fn pins(&self) -> impl Iterator<Item = (PinNumber, PackagePin)>;
+    pub fn pin_of_pad(&self, pad: PadId) -> Option<PinNumber>;
+    pub fn pin_of_clock(&self, clock: ClockResourceId) -> Option<PinNumber>;
+    pub fn pin_of_input(&self, input: InputResourceId) -> Option<PinNumber>;
 }
 
 pub enum PackagePin {
@@ -1641,7 +1659,31 @@ pub enum PackagePin {
     SharedClockInput { clock: ClockResourceId, input: InputResourceId },
     NoConnect,
 }
+
+pub enum PowerRail { Ground, Supply }
 ```
+
+`SharedClockInput` means a pin serves both roles **simultaneously**, not as alternatives a design must choose between. A device whose clock pin cannot also be an array input uses `Clock`.
+
+A pad carries no `InputResourceId`. Where an architecture lets an undriven I/O pin feed the array, it does so through that macrocell's own feedback path rather than through a separate input resource, and giving the pad one would double-count the path. The target models that; the package does not.
+
+`PackageSpec` is a validated type, constructed rather than assembled, so §4.7's "package mappings are unique" holds for every value of it:
+
+```rust
+pub enum PackageError {
+    NoPins { name: &'static str },
+    DuplicatePin { name: &'static str, pin: PinNumber, first: PackagePin, second: PackagePin },
+    DuplicatePad { name: &'static str, pad: PadId, first: PinNumber, second: PinNumber },
+    DuplicateClock { name: &'static str, clock: ClockResourceId, first: PinNumber, second: PinNumber },
+    DuplicateInput { name: &'static str, input: InputResourceId, first: PinNumber, second: PinNumber },
+}
+```
+
+Construction checks two things. **No pin may be listed twice** — accumulating the map by insertion rather than by `collect` — because a last-wins map silently drops a role and makes the written order of a package definition observable in its result. **No pad, clock, or input resource may appear on two pins**, counting a `SharedClockInput` pin as claiming both of its resources. A package that mapped one pad to two pins would let a fitter place an output and a report name a different pin than the bench does, with nothing in between to notice.
+
+Error fields carry the newtypes rather than the integers inside them: `DuplicatePad { pad: u8, first: u8, second: u8 }` is three adjacent `u8`s of which two are pin numbers, and transposing them compiles.
+
+Pins are keyed by a `BTreeMap`, so declaration order is not observable (§0.2.5) and a duplicate diagnostic names the lower-numbered pin first on every run.
 
 ## 4.7 ATF22V10 model
 
@@ -2742,6 +2784,7 @@ fn search(
 ```rust
 pub enum EvidenceLevel {
     Hypothesis,
+    DatasheetSpecified,
     DifferentiallyVerified,
     OpenSourceCrossChecked,
     HardwareVerified,
@@ -2749,6 +2792,10 @@ pub enum EvidenceLevel {
 ```
 
 Production target fields must meet the project's configured evidence threshold. Unverified hypotheses belong only in oracle-analysis code or disabled experimental targets.
+
+**The ordering counts independent witnesses; it does not rank authority.** `DatasheetSpecified` sits below `DifferentiallyVerified` because one document is one witness, not because a vendor is less trustworthy than an oracle run — for a fact the oracle cannot observe at all, such as which pin is bonded to ground, the datasheet is the *better* witness and the only one available. A field at `DatasheetSpecified` is a field nothing has corroborated yet, which is what the level is for.
+
+`DatasheetSpecified` exists because package pinouts, supply rails, and electrical roles are real, citable device knowledge that no fuse experiment can reach, and calling them `Hypothesis` would put a published specification in the same class as a guess.
 
 ## 13.2 Safety
 

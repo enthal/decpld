@@ -1,0 +1,34 @@
+Name     pwr12;
+PartNo   00;
+Date     2026-01-01;
+Revision 01;
+Designer decpld;
+Company  decpld;
+Assembly none;
+Location none;
+Device   g22v10;
+
+/* EXPECT refusal
+
+   Pin 12 is GND (atf22v10c-datasheet Table 2-1, Figure 2-2). This
+   asks the oracle to use it as a signal anyway.
+
+   The expected result is a REFUSAL, not a JEDEC file: WinCUPL reports
+   "invalid input" in the .lst and produces no output. That refusal is
+   the measurement. A pinout diagram says which pins are supply rails;
+   this says the compiler agrees, which is what makes "not usable by a
+   design" a checked claim rather than a transcription of a diagram.
+
+   run.sh reads the "EXPECT refusal" line above and reports the refusal
+   as a result, exiting 0, so a batch run of the suite does not stop
+   here. It also fails loudly if the oracle ever ACCEPTS this design,
+   because that would mean the claim is wrong.
+
+   The marker sits inside a CUPL comment so it cannot be mistaken for a
+   declaration. That it is inert is checked rather than assumed: see
+   marker-inert.pld, which carries the same line and must compile. */
+
+PIN 12 = a;
+PIN 23 = o0;
+
+o0 = a;
