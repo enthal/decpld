@@ -1560,6 +1560,18 @@ pub enum FuseWriteError {
     Security { fuse: FuseId },
     NoSecurityFuse,
 }
+
+impl FuseMap {
+    pub fn erased(regions: FuseRegions) -> Self;
+    pub fn from_states(regions: FuseRegions, states: impl IntoIterator<Item = bool>)
+        -> Result<Self, FuseStatesError>;
+}
+
+/// Why an existing fuse vector does not describe this device.
+pub enum FuseStatesError {
+    WrongLength { expected: u32, actual: usize },
+    Reserved { fuse: FuseId, region: &'static str, required: bool, found: bool },
+}
 ```
 
 **The security fuse's guarantees are structural, not conventional.** A device model may not declare a security region that erases *set*, spans more than one fuse, or appears twice — all three are construction-time errors. Without the first, an "erased" map could arrive with the readback lock already engaged; without the second, `set_security_fuse` could half-program a region, which is the worst of the three outcomes since it is neither readable nor protected. Asking to lock a device that has no security fuse is an error rather than a silent success: the caller requested something irreversible, the device cannot do it, and answering "done" is the wrong end of "prefer a rejected build to a wrong one".
@@ -1571,6 +1583,14 @@ Writing the same value twice is not a conflict. Two encoders agreeing is not a d
 `set_all` applies several writes or none of them, validating range, mutability, and conflict — against the map *and* against earlier entries in the same batch — before applying any. A partially applied write is the worst available outcome: the map is then neither the old design nor the new one, and a fuse checksum over a half-written map is a perfectly valid checksum over the wrong thing. Same rule as `decpld-jedec`'s fuse-list application, for the same reason.
 
 The security fuse is not reachable through the ordinary write path at all. It has its own method, so arriving at it is a deliberate act rather than the result of an encoder sweeping a fuse range.
+
+`from_states` is the counterpart to `erased`, and the way a fuse vector from a file this compiler did not write becomes something the device layer can decode — §6.3's `jed inspect` runs on it. Three rules:
+
+- **Every fuse is marked written.** The file stated all of them, so leaving them unclaimed would let a later encoder overwrite a value the file gave without `Conflict` ever firing.
+- **The length must be the device's fuse count.** A file's `QF` is its claim about which part it is for; padding or truncating would silently decode a foreign file as this device.
+- **A reserved fuse that disagrees is refused**, per §13.2 — a device in that state is not one the manufacturer defines, and describing it back as a valid design would lend it credibility it has not got.
+
+The security fuse *is* accepted here, unlike through `set_security_fuse`. That gate is about the act of locking a part; a file already carrying the bit is reporting a part somebody else locked, and refusing to read it would leave the case a user most needs explained the one case that cannot be.
 
 ## 4.3 Configuration fields
 
