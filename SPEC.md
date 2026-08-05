@@ -3200,7 +3200,35 @@ pub enum EvidenceLevel {
     OpenSourceCrossChecked,
     HardwareVerified,
 }
+
+impl EvidenceLevel {
+    pub const ALL: [EvidenceLevel; 5];
+    /// The weakest level a production target field may hold.
+    pub const PRODUCTION_THRESHOLD: EvidenceLevel = EvidenceLevel::DatasheetSpecified;
+    pub fn is_production_ready(self) -> bool;
+}
+
+/// A level and what established it.
+pub struct Evidence {
+    pub level: EvidenceLevel,
+    pub sources: &'static [&'static str],
+}
+
+impl Evidence {
+    pub fn new(level: EvidenceLevel, sources: &'static [&'static str]) -> Self;
+    /// Refuses a level above `Hypothesis` that names no source.
+    pub fn checked(level: EvidenceLevel, sources: &'static [&'static str])
+        -> Result<Self, EvidenceLevel>;
+    /// What a conclusion drawn from several facts rests on: the weakest.
+    pub fn weakest(parts: impl IntoIterator<Item = Evidence>) -> CombinedEvidence;
+}
 ```
+
+**The sources are the point.** A level with nothing behind it is a claim about a claim; naming the experiments is what lets a reader re-derive the fact, and what lets every constant that trusted an oracle run be found if the run is later shown wrong. `Hypothesis` is the one level that may stand alone, because "nothing established this yet" is exactly what it means.
+
+**`weakest` takes the minimum, never an average.** A mapping assembled from a measured column table and an assumed link convention is only as established as the convention. Every source is carried through, so the weak link stays findable.
+
+A target enumerates its mappings and what established each, as `decpld-atf22v10`'s `Mapping` does. That table records *levels and citations*, never a second copy of the fuse numbers — those live once in the geometry, and a parallel table of addresses is exactly the drift this project cannot afford. Its value is that citations become checkable: a test requires every named experiment to exist on disk and every document reference to be registered in `targets/evidence/references.toml`, so a renamed experiment fails a build instead of leaving a comment that still reads plausibly.
 
 Production target fields must meet the project's configured evidence threshold. Unverified hypotheses belong only in oracle-analysis code or disabled experimental targets.
 
