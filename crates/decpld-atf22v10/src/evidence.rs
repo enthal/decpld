@@ -108,18 +108,31 @@ mappings! {
     /// The measured row-start table turns out identical to Galette's
     /// `OLMC_ROWS_22V10`, which makes that a cross-check rather than the
     /// source it once was.
+    ///
+    /// The `cap*` designs belong here and not only to capacity: filling
+    /// a block is what measured which rows it owns, and the refusal
+    /// past the end is what shows the next row belongs to the next
+    /// macrocell's enable rather than being spare. `geometry.rs`'s
+    /// `row_block` cites them by name for exactly that.
+    ///
+    /// GALasm is deliberately **not** cited. It fixes the row count at
+    /// 132; the block table is Galette's, and claiming a second
+    /// implementation for it would be the overcounting this type exists
+    /// to prevent.
     RowBlocks {
         evidence: Evidence::established(
             OpenSourceCrossChecked,
             &[
                 "in2", "fb22", "arch-comb-high", "global-ar-sp", "mc14", "mc15", "mc16", "mc17",
-                "mc18", "mc19", "mc20", "mc21", "mc22", "mc23", "galette", "galasm",
+                "mc18", "mc19", "mc20", "mc21", "mc22", "mc23", "cap23-8", "cap23-9", "cap19-16",
+                "cap19-17", "cap14-8", "cap14-9", "galette",
             ],
         ),
         document_sections: [
             "Rows: macrocell blocks",
             "S0/S1 pair order is reversed relative to the row blocks",
             "Rows 0 and 131: the device-wide control terms",
+            "Capacity",
         ],
     }
 

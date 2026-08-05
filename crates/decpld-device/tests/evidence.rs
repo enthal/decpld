@@ -46,8 +46,8 @@ fn evidence_carries_the_sources_that_established_it() {
         EvidenceLevel::DifferentiallyVerified,
         &["arch-comb-high", "arch-comb-low"],
     );
-    assert_eq!(evidence.level, EvidenceLevel::DifferentiallyVerified);
-    assert_eq!(evidence.sources, ["arch-comb-high", "arch-comb-low"]);
+    assert_eq!(evidence.level(), EvidenceLevel::DifferentiallyVerified);
+    assert_eq!(evidence.sources(), ["arch-comb-high", "arch-comb-low"]);
     assert!(evidence.is_production_ready());
 }
 
@@ -64,12 +64,12 @@ fn a_level_above_hypothesis_must_name_at_least_one_source() {
     // the previous shape had a checked constructor beside an unchecked
     // one, and every production caller reached for the unchecked one.
     let hypothesis = Evidence::hypothesis();
-    assert_eq!(hypothesis.level, EvidenceLevel::Hypothesis);
-    assert!(hypothesis.sources.is_empty(), "a hypothesis is the one level that may stand alone");
+    assert_eq!(hypothesis.level(), EvidenceLevel::Hypothesis);
+    assert!(hypothesis.sources().is_empty(), "a hypothesis is the one level that may stand alone");
     assert!(!hypothesis.is_production_ready());
 
     assert!(
-        Evidence::established(EvidenceLevel::HardwareVerified, &["part-marking"]).sources.len()
+        Evidence::established(EvidenceLevel::HardwareVerified, &["part-marking"]).sources().len()
             == 1
     );
 }
@@ -87,9 +87,9 @@ fn the_weakest_of_several_facts_is_what_a_conclusion_rests_on() {
         Evidence::established(EvidenceLevel::DatasheetSpecified, &["jedec-3a"]),
         Evidence::established(EvidenceLevel::DifferentiallyVerified, &["in2"]),
     ]);
-    assert_eq!(combined.level, EvidenceLevel::DatasheetSpecified);
+    assert_eq!(combined.level(), EvidenceLevel::DatasheetSpecified);
     // And it carries every source, so the weak link is findable.
-    assert_eq!(combined.sources, ["galette", "jedec-3a", "in2"]);
+    assert_eq!(combined.sources(), ["galette", "jedec-3a", "in2"]);
 }
 
 #[test]
@@ -104,8 +104,8 @@ fn a_source_shared_by_two_facts_is_named_once() {
         Evidence::established(EvidenceLevel::DifferentiallyVerified, &["in2", "fb22"]),
         Evidence::established(EvidenceLevel::DifferentiallyVerified, &["fb22", "in2", "mc14"]),
     ]);
-    assert_eq!(combined.level, EvidenceLevel::DifferentiallyVerified);
-    assert_eq!(combined.sources, ["in2", "fb22", "mc14"]);
+    assert_eq!(combined.level(), EvidenceLevel::DifferentiallyVerified);
+    assert_eq!(combined.sources(), ["in2", "fb22", "mc14"]);
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn the_weakest_of_nothing_is_a_hypothesis_not_hardware_verification() {
     // conclusion is hardware-verified, which is the one level SPEC.md
     // §7.8 requires a physical record to accompany.
     let nothing = Evidence::weakest([]);
-    assert_eq!(nothing.level, EvidenceLevel::Hypothesis);
-    assert!(nothing.sources.is_empty());
+    assert_eq!(nothing.level(), EvidenceLevel::Hypothesis);
+    assert!(nothing.sources().is_empty());
     assert!(!nothing.is_production_ready(), "nothing may not ship");
 }

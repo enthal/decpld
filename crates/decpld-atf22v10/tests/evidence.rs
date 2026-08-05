@@ -102,7 +102,7 @@ fn cited_experiments(mapping: Mapping) -> BTreeSet<String> {
     let documents = reference_ids();
     mapping
         .evidence()
-        .sources
+        .sources()
         .iter()
         .filter(|source| !documents.contains(**source))
         .map(|source| (*source).to_owned())
@@ -125,6 +125,36 @@ fn the_experiment_index_lists_only_designs() {
 }
 
 #[test]
+fn the_document_states_its_citations_in_one_idiom() {
+    // The projection below reads lines beginning `Experiments:`. A line
+    // beginning `Experiments` without the colon reads identically to a
+    // human and is invisible to it, so a real measurement could enter
+    // the argument while the checkable table silently failed to record
+    // it — the drift this whole mechanism exists to prevent, running in
+    // the direction the projection cannot see.
+    //
+    // Rejected rather than parsed: the colon-less form runs on into
+    // prose, and `Experiment `oe-bidir`: pin 23 is driven when `e` is
+    // high` would contribute `e` as a citation. One idiom, enforced, is
+    // cheaper than a parser that guesses where a citation list ends.
+    let text = std::fs::read_to_string(repo_path("targets/evidence/atf22v10-fuse-map.md"))
+        .expect("the evidence document is in the repository");
+    for (number, line) in text.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("Experiment") {
+            continue;
+        }
+        assert!(
+            trimmed.starts_with("Experiments:") || trimmed.starts_with("Experiment:"),
+            "atf22v10-fuse-map.md line {}: a citation line must read `Experiments:` \
+             or `Experiment:`, so that the table can be checked against it — got `{}`",
+            number + 1,
+            trimmed.chars().take(40).collect::<String>()
+        );
+    }
+}
+
+#[test]
 fn every_cited_source_is_an_experiment_or_a_registered_reference() {
     // The reason this table is data rather than only a comment. A
     // comment citing `oe-var` goes on reading plausibly after the file
@@ -139,7 +169,7 @@ fn every_cited_source_is_an_experiment_or_a_registered_reference() {
     let experiments = experiment_names();
     let documents = reference_ids();
     for mapping in Mapping::ALL.iter().copied() {
-        for source in mapping.evidence().sources {
+        for source in mapping.evidence().sources() {
             assert!(
                 experiments.contains(*source) || documents.contains(*source),
                 "{mapping:?} cites `{source}`, which is neither an experiment in {} \
@@ -171,6 +201,11 @@ fn the_table_cites_exactly_what_the_evidence_document_cites() {
                      which is not a heading in targets/evidence/atf22v10-fuse-map.md"
                 )
             });
+            assert!(
+                !cited.is_empty(),
+                "{mapping:?} names document section `{section}`, which cites no experiment — \
+                 a section that establishes nothing cannot be what established a mapping"
+            );
             expected.extend(cited.iter().cloned());
         }
         for name in &expected {
@@ -240,9 +275,18 @@ fn every_mapping_holds_the_level_the_evidence_document_argues_for() {
         // Only hardware can corroborate it. See below.
         (Mapping::LinkConvention, DatasheetSpecified),
     ];
-    assert_eq!(expected.len(), Mapping::ALL.len(), "a mapping is missing from this table");
-    for (mapping, level) in expected {
-        assert_eq!(mapping.evidence().level, level, "{mapping:?}");
+    // Keyed, not counted. A length check passes when a row is
+    // duplicated and another is dropped, which leaves the dropped
+    // mapping's level pinned by nothing — and raising it then ships a
+    // claim no test disputes.
+    let expected: BTreeMap<Mapping, EvidenceLevel> = expected.into_iter().collect();
+    assert_eq!(
+        expected.keys().copied().collect::<BTreeSet<_>>(),
+        Mapping::ALL.iter().copied().collect::<BTreeSet<_>>(),
+        "this table and Mapping::ALL name different mappings"
+    );
+    for mapping in Mapping::ALL.iter().copied() {
+        assert_eq!(mapping.evidence().level(), expected[&mapping], "{mapping:?}");
     }
 }
 
@@ -256,9 +300,9 @@ fn every_mapping_meets_the_production_threshold() {
         assert!(
             evidence.is_production_ready(),
             "{mapping:?} is only {} — it may not ship in a production target",
-            evidence.level
+            evidence.level()
         );
-        assert!(!evidence.sources.is_empty(), "{mapping:?} names no source");
+        assert!(!evidence.sources().is_empty(), "{mapping:?} names no source");
     }
 }
 
@@ -272,9 +316,9 @@ fn capacity_overall_is_only_as_established_as_its_weakest_block() {
         Mapping::CapacityMeasured.evidence(),
         Mapping::CapacityCrossChecked.evidence(),
     ]);
-    assert_eq!(combined.level, EvidenceLevel::DatasheetSpecified);
-    assert!(combined.sources.contains(&"cap23-9"), "the weak link stays findable");
-    assert!(combined.sources.contains(&"galette"));
+    assert_eq!(combined.level(), EvidenceLevel::DatasheetSpecified);
+    assert!(combined.sources().contains(&"cap23-9"), "the weak link stays findable");
+    assert!(combined.sources().contains(&"galette"));
 }
 
 #[test]
@@ -290,9 +334,9 @@ fn the_link_convention_is_the_weakest_thing_this_device_rests_on() {
     // good news that must be accompanied by the hardware run that
     // earned it.
     let convention = Mapping::LinkConvention.evidence();
-    assert_eq!(convention.level, EvidenceLevel::DatasheetSpecified);
+    assert_eq!(convention.level(), EvidenceLevel::DatasheetSpecified);
     assert_eq!(
-        Mapping::ALL.iter().map(|mapping| mapping.evidence().level).min(),
+        Mapping::ALL.iter().map(|mapping| mapping.evidence().level()).min(),
         Some(EvidenceLevel::DatasheetSpecified)
     );
 }
@@ -305,7 +349,7 @@ fn nothing_on_this_device_is_hardware_verified_yet() {
     // version, JEDEC hash, vectors, results.
     for mapping in Mapping::ALL.iter().copied() {
         assert_ne!(
-            mapping.evidence().level,
+            mapping.evidence().level(),
             EvidenceLevel::HardwareVerified,
             "{mapping:?} claims hardware verification; §7.8 requires the record to go with it"
         );

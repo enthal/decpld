@@ -265,7 +265,7 @@ Experiments: `clk-shared`.
 
 ### Every I/O pin can be an input, through its own feedback column
 
-Experiments `ioin14` … `ioin23`. Each drives one I/O pin from a *different* I/O pin that is never itself driven. The literal lands on the undriven pin's macrocell feedback column in every case:
+Ten designs, `ioin14` … `ioin23`, each drive one I/O pin from a *different* I/O pin that is never itself driven. The literal lands on the undriven pin's macrocell feedback column in every case:
 
 | undriven pin | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -285,7 +285,7 @@ Experiments: `ioin14`, `ioin15`, `ioin16`, `ioin17`, `ioin18`, `ioin19`, `ioin20
 
 ### Pins 12 and 24 are refused as signals
 
-Experiments `pwr12` and `pwr24` ask WinCUPL to use a supply rail as a signal. It reports `invalid input` and produces no JEDEC, while the otherwise identical `in2` compiles.
+The `pwr12` and `pwr24` designs ask WinCUPL to use a supply rail as a signal. It reports `invalid input` and produces no JEDEC, while the otherwise identical `in2` compiles.
 
 That the datasheet calls them GND and VCC is what says *which rail each is* — no fuse experiment can see what a pin is bonded to. That the compiler refuses them is what makes "not usable by a design" a checked claim rather than a transcription of a diagram.
 
@@ -329,9 +329,11 @@ One residual dependency is worth naming. Treating a permanently disabled output 
 
 Note in passing that `in2` and `oe-always` carry different `Name` fields and are still bit-identical, so `Name` reaches no fuse — unlike `PartNo`, which [the user signature](#the-user-signature-carries-cupls-partno) records as landing in the signature region.
 
+Experiments: `in2`, `oe-always`, `oe-var`, `oe-var-not`, `oe-never`, `oe-bidir`. All six compile; none needs an `EXPECT refusal` marker. `in2` is the baseline the other five are differenced against — the table above reads it as the design that writes no `.oe` at all, and "`oe-never` differs from `in2` in the enable row and in nothing else" is the whole finding.
+
 ### Bidirectional readback uses the feedback column
 
-Experiment `oe-bidir`: pin 23 is driven when `e` is high and read into pin 22 the rest of the time — one pin as output and input at once, which the `ioin*` designs could not reach because nothing drove those pins.
+In `oe-bidir`, pin 23 is driven when `e` is high and read into pin 22 the rest of the time — one pin as output and input at once, which the `ioin*` designs could not reach because nothing drove those pins.
 
 | row | extent | intact | column | meaning |
 |---|---|---|---|---|
@@ -345,8 +347,6 @@ Column 2 is both what the `fb*` sweep recorded for pin 23's **feedback** and wha
 Pin 22's architecture pair reads S0 = 1, S1 = 1 (fuses 5810 and 5811 blown), combinational and active high, as expected for `o1 = io0`.
 
 These runs also extend [Columns: signal sources](#columns-signal-sources) in a direction it had not reached. `oe-var` places column 8 in **row 1** and `oe-var-not` places **column 9** there — the first measurement of any column in an output-enable row, and the first of a *complement* column outside pin 23's first data row.
-
-Experiments: `in2`, `oe-always`, `oe-var`, `oe-var-not`, `oe-never`, `oe-bidir`. All six compile; none needs an `EXPECT refusal` marker. `in2` is the baseline the other five are differenced against — the table above reads it as the design that writes no `.oe` at all, and "`oe-never` differs from `in2` in the enable row and in nothing else" is the whole finding.
 
 ## The three JEDEC footprints, and the power-down fuse
 

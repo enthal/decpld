@@ -18,13 +18,23 @@ use std::fmt;
 /// run. For a fact no fuse experiment can observe — which pin is bonded
 /// to ground, what a supply rail is — the datasheet is the *better*
 /// witness and the only one available. A field at that level is a field
-/// nothing has corroborated yet, which is what the level is for.
+/// no *experiment* has reached, which is what the level is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EvidenceLevel {
     /// Nothing established this. Belongs in oracle-analysis code or a
     /// disabled experimental target, never in a production target.
     Hypothesis,
-    /// One document says so, and nothing else has corroborated it.
+    /// Documents say so, and no experiment has touched it.
+    ///
+    /// Usually one document. It is also where a fact that **two**
+    /// documents agree on has to sit, and the ladder has no rung of its
+    /// own for that: the levels above assert a controlled experiment,
+    /// and two implementations agreeing with each other is not one.
+    /// Taking the highest rung whose prerequisites are met is the rule,
+    /// so a fact with two documents and no run is `DatasheetSpecified` —
+    /// see `decpld-atf22v10`'s `CapacityCrossChecked`. Adding a rung
+    /// would be a change to this ladder and to SPEC.md §13.1, not
+    /// something to infer from a single mapping needing it.
     DatasheetSpecified,
     /// A controlled experiment changed one thing and observed the
     /// result.
@@ -81,12 +91,23 @@ impl fmt::Display for EvidenceLevel {
 /// about a claim — naming the experiments is what lets a reader
 /// re-derive the fact, and what lets every constant that trusted an
 /// oracle run be found if the run is later shown wrong.
+/// The fields are private, and that is the whole point. Public fields
+/// leave a struct literal as an unchecked back door around
+/// [`Evidence::established`] — `Evidence { level: HardwareVerified,
+/// sources: &[] }` would compile from any crate — which puts the rule
+/// back where it started, resting on callers choosing the honest
+/// constructor.
+///
+/// ```compile_fail
+/// # use decpld_device::{Evidence, EvidenceLevel};
+/// let _ = Evidence { level: EvidenceLevel::HardwareVerified, sources: &[] };
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Evidence {
-    pub level: EvidenceLevel,
+    level: EvidenceLevel,
     /// Experiment names, document sections, or implementation
     /// references — whatever a reader would go and look at.
-    pub sources: &'static [&'static str],
+    sources: &'static [&'static str],
 }
 
 impl Evidence {
@@ -102,7 +123,7 @@ impl Evidence {
     /// ```
     /// # use decpld_device::{Evidence, EvidenceLevel};
     /// let evidence = Evidence::established(EvidenceLevel::DatasheetSpecified, &["jedec-3a"]);
-    /// assert_eq!(evidence.sources, ["jedec-3a"]);
+    /// assert_eq!(evidence.sources(), ["jedec-3a"]);
     /// ```
     ///
     /// Naming nothing does not build:
@@ -129,6 +150,18 @@ impl Evidence {
     #[must_use]
     pub const fn hypothesis() -> Self {
         Self { level: EvidenceLevel::Hypothesis, sources: &[] }
+    }
+
+    /// How well established it is.
+    #[must_use]
+    pub const fn level(&self) -> EvidenceLevel {
+        self.level
+    }
+
+    /// What established it.
+    #[must_use]
+    pub const fn sources(&self) -> &'static [&'static str] {
+        self.sources
     }
 
     #[must_use]
@@ -171,13 +204,29 @@ impl Evidence {
 }
 
 /// Evidence drawn from several facts, owning its collected sources.
+///
+/// Private fields for the same reason [`Evidence`]'s are: a combination
+/// is a conclusion about what several facts jointly support, and a
+/// literal that asserts one directly has combined nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CombinedEvidence {
-    pub level: EvidenceLevel,
-    pub sources: Vec<&'static str>,
+    level: EvidenceLevel,
+    sources: Vec<&'static str>,
 }
 
 impl CombinedEvidence {
+    /// How well established the conclusion is: the weakest part.
+    #[must_use]
+    pub fn level(&self) -> EvidenceLevel {
+        self.level
+    }
+
+    /// Every source of every part, deduplicated, in first-seen order.
+    #[must_use]
+    pub fn sources(&self) -> &[&'static str] {
+        &self.sources
+    }
+
     #[must_use]
     pub fn is_production_ready(&self) -> bool {
         self.level.is_production_ready()

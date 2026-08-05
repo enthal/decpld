@@ -3208,11 +3208,9 @@ impl EvidenceLevel {
     pub fn is_production_ready(self) -> bool;
 }
 
-/// A level and what established it.
-pub struct Evidence {
-    pub level: EvidenceLevel,
-    pub sources: &'static [&'static str],
-}
+/// A level and what established it. Fields are private: a struct
+/// literal would be an unchecked way around `established`.
+pub struct Evidence { /* level, sources */ }
 
 impl Evidence {
     /// Naming no source does not compile: `N` is the source count.
@@ -3222,6 +3220,8 @@ impl Evidence {
     ) -> Self;
     /// Nothing has established this yet. The one level that stands alone.
     pub const fn hypothesis() -> Self;
+    pub const fn level(&self) -> EvidenceLevel;
+    pub const fn sources(&self) -> &'static [&'static str];
     /// What a conclusion drawn from several facts rests on: the weakest.
     pub fn weakest(parts: impl IntoIterator<Item = Evidence>) -> CombinedEvidence;
 }
@@ -3229,7 +3229,9 @@ impl Evidence {
 
 **The sources are the point.** A level with nothing behind it is a claim about a claim; naming the experiments is what lets a reader re-derive the fact, and what lets every constant that trusted an oracle run be found if the run is later shown wrong. `Hypothesis` is the one level that may stand alone, because "nothing established this yet" is exactly what it means.
 
-**Naming a source is a compile-time obligation, not a check.** `established` takes its sources as an array reference, so an empty list has length zero and fails a const assertion before the program runs. A constructor that merely *offers* to validate is decoration: the unchecked path is the one callers reach for, and the rule then survives only in whatever test re-asserts it by hand.
+**Naming a source is a compile-time obligation, not a check.** `established` takes its sources as an array reference, so an empty list has length zero and fails a const assertion before the program runs. A constructor that merely *offers* to validate is decoration: the unchecked path is the one callers reach for, and the rule then survives only in whatever test re-asserts it by hand. `Evidence`'s fields are private for the same reason — a struct literal is an unchecked constructor by another name.
+
+**The ladder has no rung for "two documents agree, no experiment".** Every level above `DatasheetSpecified` asserts a controlled experiment, and two implementations agreeing with each other is not one. A fact in that state takes the highest rung whose prerequisites are met, which is `DatasheetSpecified` — so that level means *documents say so and no experiment has touched it*, usually but not always a single document. `decpld-atf22v10`'s `CapacityCrossChecked` is the case in point: seven macrocell sizes on which Galette and the datasheet agree and no design has ever been run. Adding a rung is a change to this ladder, made here and deliberately, never inferred from one mapping needing it.
 
 **`weakest` takes the minimum, never an average.** A mapping assembled from a measured column table and an assumed link convention is only as established as the convention. Every source is carried through, so the weak link stays findable, and a source named by two parts appears once — repeating it would read as two witnesses where there is one. Combining *nothing* yields `Hypothesis`, not the identity a fold over `min` would give: seeding with the strongest level answers `HardwareVerified` for an empty set, which is maximal evidence for no facts at all.
 
@@ -3237,7 +3239,7 @@ A target enumerates its mappings and what established each, as `decpld-atf22v10`
 
 Production target fields must meet the project's configured evidence threshold. Unverified hypotheses belong only in oracle-analysis code or disabled experimental targets.
 
-**The ordering counts independent witnesses; it does not rank authority.** `DatasheetSpecified` sits below `DifferentiallyVerified` because one document is one witness, not because a vendor is less trustworthy than an oracle run — for a fact the oracle cannot observe at all, such as which pin is bonded to ground, the datasheet is the *better* witness and the only one available. A field at `DatasheetSpecified` is a field nothing has corroborated yet, which is what the level is for.
+**The ordering counts independent witnesses; it does not rank authority.** `DatasheetSpecified` sits below `DifferentiallyVerified` because one document is one witness, not because a vendor is less trustworthy than an oracle run — for a fact the oracle cannot observe at all, such as which pin is bonded to ground, the datasheet is the *better* witness and the only one available. A field at `DatasheetSpecified` is a field no *experiment* has reached, which is what the level is for.
 
 `DatasheetSpecified` exists because package pinouts, supply rails, and electrical roles are real, citable device knowledge that no fuse experiment can reach, and calling them `Hypothesis` would put a published specification in the same class as a guess.
 
