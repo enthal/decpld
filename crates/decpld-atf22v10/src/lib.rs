@@ -12,6 +12,7 @@
 //! device; `decpld-jedec` serialises fuse states.
 
 mod design;
+mod evidence;
 mod geometry;
 mod macrocells;
 mod matrix;
@@ -19,6 +20,7 @@ mod packages;
 mod regions;
 
 pub use design::{DEVICE, DesignError, blank_design, decode_design, encode_design};
+pub use evidence::Mapping;
 pub use geometry::{
     ASYNCHRONOUS_RESET_ROW, ArrayCell, Atf22v10Geometry, COLUMNS, MacrocellIndex, ROWS, RowBlock,
     SYNCHRONOUS_PRESET_ROW, SignalSource, SourceKind,

@@ -20,6 +20,7 @@
 
 mod and_matrix;
 mod config;
+mod evidence;
 mod fuse_map;
 mod meaning;
 mod package;
@@ -34,6 +35,7 @@ pub use config::{
     ConfigField, ConfigFieldError, ConfigFieldId, FeedbackSource, LogicalOutputId, MacrocellConfig,
     MacrocellMode, MacrocellSpec, OutputPolarity, PhysicalDesign, PlacedCube,
 };
+pub use evidence::{CombinedEvidence, Evidence, EvidenceLevel};
 pub use fuse_map::{FuseMap, FuseStatesError, FuseWriteError};
 pub use meaning::{FuseMeaning, classify_fuse};
 pub use package::{

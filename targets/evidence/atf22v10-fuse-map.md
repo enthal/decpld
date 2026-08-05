@@ -104,6 +104,8 @@ All 22 sources are accounted for: even sources 0–20 are input pins 1–11, odd
 
 **Note the exception.** All ten feedbacks sit at odd sources, so "odd means feedback" holds for every feedback — but it fails in the other direction, on one of the *eleven* odd sources: source 21 is input pin 13. Each of the ten feedbacks was measured rather than extrapolated from pin 22, which is the only reason the boundary is known.
 
+Experiments: `in1`, `in2`, `in3`, `in4`, `in5`, `in6`, `in7`, `in8`, `in9`, `in10`, `in11`, `in13`, `fb14`, `fb15`, `fb16`, `fb17`, `fb18`, `fb19`, `fb20`, `fb21`, `fb22`, `fb23` — one design per source, both sweeps listed in full because the two column maps run in opposite directions and a range would hide which points were measured.
+
 ## Rows: macrocell blocks
 
 A design driving pin 23 uses rows 1–9; one driving pin 22 uses rows 10–20. Within a block the **first row is the output-enable term** and the rest are data terms. It appears all-blown — a no-literal product term, permanently enabled — in every design that does not write an `.oe`, which is what identified it; [Output enable](#output-enable) measures what the row holds when a design does write one.
@@ -176,6 +178,8 @@ Pair 0 is fuses 5808 (S0) and 5809 (S1). Four experiments varying mode and polar
 
 **S0 selects polarity** — 1 is active high. **S1 selects mode** — 1 is combinational, 0 is registered.
 
+Experiments: `arch-comb-high`, `arch-comb-low`, `arch-reg-high`, `arch-reg-low`.
+
 ## S0/S1 pair order is reversed relative to the row blocks
 
 A design using only pin 23 sets pair 0 (5808, 5809). Adding pin 22 additionally sets pair 1 (5810, 5811). So
@@ -202,7 +206,7 @@ This began as five measurements with the other five interpolated, and the row ta
 
 Block sizes follow from contiguity: block *i* ends where block *i−1* begins, and the topmost ends at row 131. They agree with Galette's `OLMC_SIZE_22V10`.
 
-Experiments: `mc14` … `mc23`, one single-macrocell design each. Pins 22 and 23 are additionally corroborated by `fb22` and `arch-comb-high`, which read the same values out of two-output designs.
+Experiments: `mc14`, `mc15`, `mc16`, `mc17`, `mc18`, `mc19`, `mc20`, `mc21`, `mc22`, `mc23` — one single-macrocell design each, listed rather than abbreviated to a range, because "measured at both ends" is exactly what this section records as the earlier error. Pins 22 and 23 are additionally corroborated by `fb22` and `arch-comb-high`, which read the same values out of two-output designs.
 
 ## Rows 0 and 131: the device-wide control terms
 
@@ -233,6 +237,12 @@ WinCUPL is one witness, not an authority. Where it is the *only* witness — the
 
 The array's fuse addressing is WinCUPL-only in the same way, and is the one claim here with an independent implementation to check against: Galette and GALasm both encode row·44 + column. That makes it `OpenSourceCrossChecked` in addition to `DifferentiallyVerified`.
 
+**Capacity is not one claim, and it does not hold one level.** Three blocks — pins 14, 19 and 23 — were filled and the term past each refused, and those agree with Galette's `OLMC_SIZE_22V10`: `OpenSourceCrossChecked`. The other seven sizes have no experiment at all. They rest on Galette's table and the datasheet's "8 TO 16 PRODUCT TERMS" agreeing with each other, which is two documents and no differential, so they sit at `DatasheetSpecified` — the highest level whose prerequisites are met, since the ladder is a total order and every rung asserts the rungs beneath it. Reporting the whole mapping at the measured blocks' level would claim a boundary experiment for seven macrocells that have never seen one, and this document has been wrong in the shape of "measured at both ends, assumed in the middle" before.
+
+**Pin roles take the weaker of their two halves.** The section above mixes facts only the datasheet can supply with behaviour the oracle demonstrates, so a single machine-readable entry covering it is `DatasheetSpecified`: the rail assignment is a one-witness claim, and no number of compile refusals turns it into two. `atf22v10c-datasheet` is therefore a cited source of that entry and not merely of the prose.
+
+**How the machine-readable table relates to this document.** `decpld-atf22v10`'s `Mapping` records each mapping's level and citations so a test can check them; this document remains the argument, and the table is a projection of it. The `Experiments:` lines are the interface between the two — every experiment a section names must appear in that section's entry and no other experiment may, which is what stops the two from drifting apart. Ranges are therefore written out: `mc14` … `mc23` reads like ten designs and names two.
+
 ## Pin roles: the DIP-24 package
 
 Pin roles are the one part of this document the datasheet is authoritative for. What a pin is *called* and what it is *bonded to* is a fact about the package, not something a compiler's output reveals — so `atf22v10c-datasheet` Table 2-1 "Pin Configurations" and Figure 2-2 "DIP/SOIC" are the source:
@@ -251,9 +261,11 @@ What the datasheet cannot settle is how the compiler may *use* those pins, and t
 
 So the roles are simultaneous, not alternative. A model that made them alternatives would reject that design with a resource error, and the error would be the compiler's, not the user's.
 
+Experiments: `clk-shared`.
+
 ### Every I/O pin can be an input, through its own feedback column
 
-Experiments `ioin14` … `ioin23`. Each drives one I/O pin from a *different* I/O pin that is never itself driven. The literal lands on the undriven pin's macrocell feedback column in every case:
+Ten designs, `ioin14` … `ioin23`, each drive one I/O pin from a *different* I/O pin that is never itself driven. The literal lands on the undriven pin's macrocell feedback column in every case:
 
 | undriven pin | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -269,15 +281,19 @@ All ten were measured rather than generalised from one. The feedback column map 
 
 The undriven macrocell is left combinational and active low in every one of the ten (S1 set, S0 clear in its architecture pair), and its output-enable row is left entirely intact. Which of the two holds the pin off is settled by [Output enable](#output-enable) below, not by these experiments: `oe-never` asks for a permanently disabled output *without* changing the architecture bits and gets the same all-intact enable row, so the row is the mechanism and the architecture bits are incidental.
 
+Experiments: `ioin14`, `ioin15`, `ioin16`, `ioin17`, `ioin18`, `ioin19`, `ioin20`, `ioin21`, `ioin22`, `ioin23` — all ten listed, for the reason the paragraph above gives.
+
 ### Pins 12 and 24 are refused as signals
 
-Experiments `pwr12` and `pwr24` ask WinCUPL to use a supply rail as a signal. It reports `invalid input` and produces no JEDEC, while the otherwise identical `in2` compiles.
+The `pwr12` and `pwr24` designs ask WinCUPL to use a supply rail as a signal. It reports `invalid input` and produces no JEDEC, while the otherwise identical `in2` compiles.
 
 That the datasheet calls them GND and VCC is what says *which rail each is* — no fuse experiment can see what a pin is bonded to. That the compiler refuses them is what makes "not usable by a design" a checked claim rather than a transcription of a diagram.
 
 Both declare `EXPECT refusal` on a line of their own, which `run.sh` reads: it reports the refusal as a result and exits 0, so a batch re-run of the suite does not stop on them, and it fails loudly if the oracle ever *accepts* one — an accepted design would mean the claim is wrong, which is the outcome worth shouting about.
 
 The marker sits inside a CUPL comment. `marker-inert` is `in2` carrying the same words and must still compile: `pwr12` and `pwr24` fail for their own reasons, so neither can show that the marker is inert rather than a syntax error being mistaken for the refusal under test.
+
+Experiments: `pwr12`, `pwr24`, `marker-inert`, `in2` — the last being the compiling control the two refusals are read against.
 
 ## Output enable
 
@@ -313,9 +329,11 @@ One residual dependency is worth naming. Treating a permanently disabled output 
 
 Note in passing that `in2` and `oe-always` carry different `Name` fields and are still bit-identical, so `Name` reaches no fuse — unlike `PartNo`, which [the user signature](#the-user-signature-carries-cupls-partno) records as landing in the signature region.
 
+Experiments: `in2`, `oe-always`, `oe-var`, `oe-var-not`, `oe-never`, `oe-bidir`. All six compile; none needs an `EXPECT refusal` marker. `in2` is the baseline the other five are differenced against — the table above reads it as the design that writes no `.oe` at all, and "`oe-never` differs from `in2` in the enable row and in nothing else" is the whole finding.
+
 ### Bidirectional readback uses the feedback column
 
-Experiment `oe-bidir`: pin 23 is driven when `e` is high and read into pin 22 the rest of the time — one pin as output and input at once, which the `ioin*` designs could not reach because nothing drove those pins.
+In `oe-bidir`, pin 23 is driven when `e` is high and read into pin 22 the rest of the time — one pin as output and input at once, which the `ioin*` designs could not reach because nothing drove those pins.
 
 | row | extent | intact | column | meaning |
 |---|---|---|---|---|
@@ -329,8 +347,6 @@ Column 2 is both what the `fb*` sweep recorded for pin 23's **feedback** and wha
 Pin 22's architecture pair reads S0 = 1, S1 = 1 (fuses 5810 and 5811 blown), combinational and active high, as expected for `o1 = io0`.
 
 These runs also extend [Columns: signal sources](#columns-signal-sources) in a direction it had not reached. `oe-var` places column 8 in **row 1** and `oe-var-not` places **column 9** there — the first measurement of any column in an output-enable row, and the first of a *complement* column outside pin 23's first data row.
-
-Experiments: `oe-always`, `oe-var`, `oe-var-not`, `oe-never`, `oe-bidir`. All five compile; none needs an `EXPECT refusal` marker.
 
 ## The three JEDEC footprints, and the power-down fuse
 
