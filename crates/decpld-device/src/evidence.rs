@@ -125,15 +125,22 @@ impl Evidence {
     /// a measured column table and an assumed link convention is only
     /// as established as the convention. Every source is carried
     /// through, so the weak link stays findable.
+    ///
+    /// Combining *nothing* yields [`EvidenceLevel::Hypothesis`], not
+    /// the identity a fold over `min` would give. Seeding with the
+    /// strongest level is the natural way to write this and answers
+    /// `HardwareVerified` for an empty iterator — maximal evidence for
+    /// no facts at all, which on this project is the worst available
+    /// default.
     #[must_use]
     pub fn weakest(parts: impl IntoIterator<Item = Evidence>) -> CombinedEvidence {
-        let mut level = EvidenceLevel::HardwareVerified;
+        let mut level = None;
         let mut sources = Vec::new();
         for part in parts {
-            level = level.min(part.level);
+            level = Some(level.map_or(part.level, |held: EvidenceLevel| held.min(part.level)));
             sources.extend_from_slice(part.sources);
         }
-        CombinedEvidence { level, sources }
+        CombinedEvidence { level: level.unwrap_or(EvidenceLevel::Hypothesis), sources }
     }
 }
 

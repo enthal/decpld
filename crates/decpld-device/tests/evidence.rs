@@ -80,3 +80,19 @@ fn the_weakest_of_several_facts_is_what_a_conclusion_rests_on() {
     // And it carries every source, so the weak link is findable.
     assert_eq!(combined.sources, ["galette", "jedec-3a", "in2"]);
 }
+
+#[test]
+fn the_weakest_of_nothing_is_a_hypothesis_not_hardware_verification() {
+    // Seeding a minimum with the strongest level and folding is the
+    // natural way to write `weakest`, and it answers `HardwareVerified`
+    // for an empty iterator — maximal evidence for no facts at all.
+    //
+    // On this project that is the worst possible default: a caller
+    // combining an empty set of measurements would be told its
+    // conclusion is hardware-verified, which is the one level SPEC.md
+    // §7.8 requires a physical record to accompany.
+    let nothing = Evidence::weakest([]);
+    assert_eq!(nothing.level, EvidenceLevel::Hypothesis);
+    assert!(nothing.sources.is_empty());
+    assert!(!nothing.is_production_ready(), "nothing may not ship");
+}
