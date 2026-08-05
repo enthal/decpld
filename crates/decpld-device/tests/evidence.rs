@@ -42,8 +42,10 @@ fn evidence_carries_the_sources_that_established_it() {
     // the experiments is what lets a reader re-derive the fact, and
     // what lets every test that trusted an oracle run be found if the
     // run is later shown wrong.
-    let evidence =
-        Evidence::new(EvidenceLevel::DifferentiallyVerified, &["arch-comb-high", "arch-comb-low"]);
+    let evidence = Evidence::established(
+        EvidenceLevel::DifferentiallyVerified,
+        &["arch-comb-high", "arch-comb-low"],
+    );
     assert_eq!(evidence.level, EvidenceLevel::DifferentiallyVerified);
     assert_eq!(evidence.sources, ["arch-comb-high", "arch-comb-low"]);
     assert!(evidence.is_production_ready());
@@ -51,16 +53,25 @@ fn evidence_carries_the_sources_that_established_it() {
 
 #[test]
 fn a_level_above_hypothesis_must_name_at_least_one_source() {
-    // The rule that stops the type from being decoration. `Hypothesis`
-    // is the one level that may stand alone, because "nothing
-    // established this yet" is exactly what it means; every other level
-    // is a claim that something did, and has to say what.
-    assert!(Evidence::checked(EvidenceLevel::Hypothesis, &[]).is_ok());
-    assert_eq!(
-        Evidence::checked(EvidenceLevel::DatasheetSpecified, &[]),
-        Err(EvidenceLevel::DatasheetSpecified)
+    // The rule that stops the type from being decoration, and it is a
+    // rule the compiler keeps: `established` takes an array by
+    // reference, so an empty source list has length zero and fails the
+    // const assertion. There is no runtime path to check, which is why
+    // this test asserts only the constructors that exist — the refusal
+    // itself is the `compile_fail` doctest on `Evidence::established`.
+    //
+    // A guard on a constructor nobody is obliged to call is decoration;
+    // the previous shape had a checked constructor beside an unchecked
+    // one, and every production caller reached for the unchecked one.
+    let hypothesis = Evidence::hypothesis();
+    assert_eq!(hypothesis.level, EvidenceLevel::Hypothesis);
+    assert!(hypothesis.sources.is_empty(), "a hypothesis is the one level that may stand alone");
+    assert!(!hypothesis.is_production_ready());
+
+    assert!(
+        Evidence::established(EvidenceLevel::HardwareVerified, &["part-marking"]).sources.len()
+            == 1
     );
-    assert!(Evidence::checked(EvidenceLevel::HardwareVerified, &["part-marking"]).is_ok());
 }
 
 #[test]
@@ -72,13 +83,29 @@ fn the_weakest_of_several_facts_is_what_a_conclusion_rests_on() {
     // intact-means-connected convention is `DatasheetSpecified`,
     // because that convention is.
     let combined = Evidence::weakest([
-        Evidence::new(EvidenceLevel::OpenSourceCrossChecked, &["galette"]),
-        Evidence::new(EvidenceLevel::DatasheetSpecified, &["jedec-3a"]),
-        Evidence::new(EvidenceLevel::DifferentiallyVerified, &["in2"]),
+        Evidence::established(EvidenceLevel::OpenSourceCrossChecked, &["galette"]),
+        Evidence::established(EvidenceLevel::DatasheetSpecified, &["jedec-3a"]),
+        Evidence::established(EvidenceLevel::DifferentiallyVerified, &["in2"]),
     ]);
     assert_eq!(combined.level, EvidenceLevel::DatasheetSpecified);
     // And it carries every source, so the weak link is findable.
     assert_eq!(combined.sources, ["galette", "jedec-3a", "in2"]);
+}
+
+#[test]
+fn a_source_shared_by_two_facts_is_named_once() {
+    // Sources are what a reader goes and looks at, and a combined list
+    // that repeats `in2` three times because three mappings rest on it
+    // reads as three witnesses rather than one. Overcounting witnesses
+    // is the specific error this whole type exists to prevent, so the
+    // combination deduplicates — keeping first-seen order, because
+    // SPEC.md §13.2 makes the rendering deterministic.
+    let combined = Evidence::weakest([
+        Evidence::established(EvidenceLevel::DifferentiallyVerified, &["in2", "fb22"]),
+        Evidence::established(EvidenceLevel::DifferentiallyVerified, &["fb22", "in2", "mc14"]),
+    ]);
+    assert_eq!(combined.level, EvidenceLevel::DifferentiallyVerified);
+    assert_eq!(combined.sources, ["in2", "fb22", "mc14"]);
 }
 
 #[test]

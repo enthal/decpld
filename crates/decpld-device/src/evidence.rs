@@ -90,28 +90,45 @@ pub struct Evidence {
 }
 
 impl Evidence {
-    /// Record evidence.
+    /// Record evidence that names at least one source.
+    ///
+    /// The non-emptiness is a **compile-time** property, not a checked
+    /// one: the sources arrive as an array reference, so an empty list
+    /// has length zero and fails the assertion below before the program
+    /// runs. A runtime guard would only be as good as the callers who
+    /// chose to use it, and a constructor that merely *offers* to check
+    /// is decoration — the wrong state has to be unrepresentable.
+    ///
+    /// ```
+    /// # use decpld_device::{Evidence, EvidenceLevel};
+    /// let evidence = Evidence::established(EvidenceLevel::DatasheetSpecified, &["jedec-3a"]);
+    /// assert_eq!(evidence.sources, ["jedec-3a"]);
+    /// ```
+    ///
+    /// Naming nothing does not build:
+    ///
+    /// ```compile_fail
+    /// # use decpld_device::{Evidence, EvidenceLevel};
+    /// let _ = Evidence::established(EvidenceLevel::DatasheetSpecified, &[]);
+    /// ```
     #[must_use]
-    pub fn new(level: EvidenceLevel, sources: &'static [&'static str]) -> Self {
+    pub const fn established<const N: usize>(
+        level: EvidenceLevel,
+        sources: &'static [&'static str; N],
+    ) -> Self {
+        const { assert!(N > 0, "evidence above a hypothesis must name what established it") }
         Self { level, sources }
     }
 
-    /// Record evidence, refusing a claim with nothing behind it.
+    /// Nothing has established this yet.
     ///
-    /// # Errors
-    ///
-    /// If `level` is above [`EvidenceLevel::Hypothesis`] and no source
-    /// is named. `Hypothesis` may stand alone — "nothing established
-    /// this yet" is exactly what it means — but every other level
-    /// asserts that something did, and has to say what.
-    pub fn checked(
-        level: EvidenceLevel,
-        sources: &'static [&'static str],
-    ) -> Result<Self, EvidenceLevel> {
-        if level > EvidenceLevel::Hypothesis && sources.is_empty() {
-            return Err(level);
-        }
-        Ok(Self { level, sources })
+    /// The one level that may stand alone, because "nothing established
+    /// this" is exactly what it means. Written as its own constructor so
+    /// that it is a deliberate statement rather than the accident of
+    /// passing an empty list.
+    #[must_use]
+    pub const fn hypothesis() -> Self {
+        Self { level: EvidenceLevel::Hypothesis, sources: &[] }
     }
 
     #[must_use]
@@ -132,13 +149,22 @@ impl Evidence {
     /// `HardwareVerified` for an empty iterator — maximal evidence for
     /// no facts at all, which on this project is the worst available
     /// default.
+    ///
+    /// A source named by two parts appears **once**, in first-seen
+    /// order. Repeating it would read as two witnesses where there is
+    /// one, and overcounting witnesses is the error this type exists to
+    /// prevent.
     #[must_use]
     pub fn weakest(parts: impl IntoIterator<Item = Evidence>) -> CombinedEvidence {
         let mut level = None;
-        let mut sources = Vec::new();
+        let mut sources: Vec<&'static str> = Vec::new();
         for part in parts {
             level = Some(level.map_or(part.level, |held: EvidenceLevel| held.min(part.level)));
-            sources.extend_from_slice(part.sources);
+            for source in part.sources {
+                if !sources.contains(source) {
+                    sources.push(source);
+                }
+            }
         }
         CombinedEvidence { level: level.unwrap_or(EvidenceLevel::Hypothesis), sources }
     }

@@ -3215,10 +3215,13 @@ pub struct Evidence {
 }
 
 impl Evidence {
-    pub fn new(level: EvidenceLevel, sources: &'static [&'static str]) -> Self;
-    /// Refuses a level above `Hypothesis` that names no source.
-    pub fn checked(level: EvidenceLevel, sources: &'static [&'static str])
-        -> Result<Self, EvidenceLevel>;
+    /// Naming no source does not compile: `N` is the source count.
+    pub const fn established<const N: usize>(
+        level: EvidenceLevel,
+        sources: &'static [&'static str; N],
+    ) -> Self;
+    /// Nothing has established this yet. The one level that stands alone.
+    pub const fn hypothesis() -> Self;
     /// What a conclusion drawn from several facts rests on: the weakest.
     pub fn weakest(parts: impl IntoIterator<Item = Evidence>) -> CombinedEvidence;
 }
@@ -3226,7 +3229,9 @@ impl Evidence {
 
 **The sources are the point.** A level with nothing behind it is a claim about a claim; naming the experiments is what lets a reader re-derive the fact, and what lets every constant that trusted an oracle run be found if the run is later shown wrong. `Hypothesis` is the one level that may stand alone, because "nothing established this yet" is exactly what it means.
 
-**`weakest` takes the minimum, never an average.** A mapping assembled from a measured column table and an assumed link convention is only as established as the convention. Every source is carried through, so the weak link stays findable. Combining *nothing* yields `Hypothesis`, not the identity a fold over `min` would give: seeding with the strongest level answers `HardwareVerified` for an empty set, which is maximal evidence for no facts at all.
+**Naming a source is a compile-time obligation, not a check.** `established` takes its sources as an array reference, so an empty list has length zero and fails a const assertion before the program runs. A constructor that merely *offers* to validate is decoration: the unchecked path is the one callers reach for, and the rule then survives only in whatever test re-asserts it by hand.
+
+**`weakest` takes the minimum, never an average.** A mapping assembled from a measured column table and an assumed link convention is only as established as the convention. Every source is carried through, so the weak link stays findable, and a source named by two parts appears once — repeating it would read as two witnesses where there is one. Combining *nothing* yields `Hypothesis`, not the identity a fold over `min` would give: seeding with the strongest level answers `HardwareVerified` for an empty set, which is maximal evidence for no facts at all.
 
 A target enumerates its mappings and what established each, as `decpld-atf22v10`'s `Mapping` does. That table records *levels and citations*, never a second copy of the fuse numbers — those live once in the geometry, and a parallel table of addresses is exactly the drift this project cannot afford. Its value is that citations become checkable: a test requires every named experiment to exist on disk and every document reference to be registered in `targets/evidence/references.toml`, so a renamed experiment fails a build instead of leaving a comment that still reads plausibly.
 
